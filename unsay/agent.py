@@ -89,21 +89,35 @@ def _render(claims: list[memory.Retrieved]) -> str:
     return "\n".join(lines)
 
 
-def _invoke(prompt: str) -> dict[str, Any]:
+def call_text(system: str, prompt: str, *, max_tokens: int = 700) -> str:
+    """One Bedrock Converse call, returning raw text.
+
+    Temperature is pinned at 0. A safety verdict that changes between identical
+    runs is not a verdict, and a benchmark that does the same is not a
+    measurement.
+    """
     cfg = settings()
     resp = client().converse(
         modelId=cfg.bedrock_model_id,
-        system=[{"text": SYSTEM}],
+        system=[{"text": system}],
         messages=[{"role": "user", "content": [{"text": prompt}]}],
-        inferenceConfig={"maxTokens": 700, "temperature": 0.0},
+        inferenceConfig={"maxTokens": max_tokens, "temperature": 0.0},
     )
-    text = resp["output"]["message"]["content"][0]["text"].strip()
+    return resp["output"]["message"]["content"][0]["text"].strip()
 
+
+def call_json(system: str, prompt: str, *, max_tokens: int = 700) -> dict[str, Any]:
+    """As ``call_text``, parsing the reply as a JSON object."""
+    text = call_text(system, prompt, max_tokens=max_tokens)
     # Models occasionally wrap JSON in a fence despite instructions.
     match = re.search(r"\{.*\}", text, re.S)
     if not match:
         raise ValueError(f"model did not return JSON: {text[:200]}")
     return json.loads(match.group(0))
+
+
+def _invoke(prompt: str) -> dict[str, Any]:
+    return call_json(SYSTEM, prompt)
 
 
 # Severity that, if present in the retrieved claims, the model is not permitted
