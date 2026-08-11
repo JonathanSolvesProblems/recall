@@ -211,7 +211,7 @@ below exists because the skill prompted it.
 
 | Service | How it is used | Status |
 |---|---|---|
-| **Amazon Bedrock** | Claude does the reasoning and picks its own citations. Titan Text Embeddings V2 produces the 1024-dimension vectors `VECTOR(1024)` is sized for. | **in progress** |
+| **Amazon Bedrock** | Titan Text Embeddings V2 produces the 1024-dimension vectors `VECTOR(1024)` is sized for; all 331 claims in the corpus are embedded with it. Claude does the reasoning and picks its own citations. | embeddings **live**, Claude pending the Anthropic use-case form |
 | **AWS Lambda** | Scheduled openFDA ingestion and change detection. | planned |
 | **Amazon S3** | Raw openFDA snapshots and signed audit exports. | planned |
 

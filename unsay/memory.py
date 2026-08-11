@@ -44,6 +44,43 @@ SEVERITY_RANK = {
     "class_iii": 3, "warning": 4, "info": 5,
 }
 
+# At most this many claims about the same drug may occupy the top-K.
+#
+# Each recalled lot is its own claim, so a drug with a long recall history can
+# take every slot: an untuned query for "blood pressure medication" came back
+# with five chlorpromazine lots out of eight. The model then reasons over one
+# drug's history instead of the several candidates the question implied.
+PER_SUBJECT_CAP = 2
+
+# How much wider to search before capping, so diversification has spare
+# candidates to promote rather than simply returning fewer rows.
+OVERFETCH = 4
+
+
+def _diversify(rows: list[dict], k: int) -> list[dict]:
+    """Trim to k, allowing at most PER_SUBJECT_CAP claims per drug.
+
+    Rows arrive sorted by similarity. Anything over the cap is set aside rather
+    than discarded, and used to backfill if capping leaves fewer than k, so an
+    open question against a corpus dominated by one drug still returns a full
+    context window instead of a short one.
+    """
+    kept: list[dict] = []
+    overflow: list[dict] = []
+    seen: dict[str, int] = {}
+
+    for r in rows:
+        subject = r["subject_id"]
+        if seen.get(subject, 0) < PER_SUBJECT_CAP:
+            seen[subject] = seen.get(subject, 0) + 1
+            kept.append(r)
+        else:
+            overflow.append(r)
+        if len(kept) == k:
+            return kept
+
+    return (kept + overflow)[:k]
+
 
 def retrieve(question: str, *, subject_id: str | None = None, k: int = 8) -> list[Retrieved]:
     """Semantic search across currently-believed claims.
@@ -52,6 +89,11 @@ def retrieve(question: str, *, subject_id: str | None = None, k: int = 8) -> lis
     candidates, so all k slots go to claims the system currently holds true.
     """
     vector = embeddings.to_sql(embeddings.embed(question))
+
+    # A named drug is already the tightest possible filter, so diversification
+    # would only throw away lots of the very drug being asked about. Overfetch
+    # and capping apply to open questions only.
+    fetch = k if subject_id else k * OVERFETCH
 
     if subject_id:
         # A named drug is a hard filter, not a hint. Semantic similarity will
@@ -67,7 +109,7 @@ def retrieve(question: str, *, subject_id: str | None = None, k: int = 8) -> lis
              ORDER BY embedding <=> %s::VECTOR
              LIMIT %s
             """,
-            (vector, subject_id, vector, k),
+            (vector, subject_id, vector, fetch),
         )
     else:
         rows = query(
@@ -80,8 +122,9 @@ def retrieve(question: str, *, subject_id: str | None = None, k: int = 8) -> lis
              ORDER BY embedding <=> %s::VECTOR
              LIMIT %s
             """,
-            (vector, vector, k),
+            (vector, vector, fetch),
         )
+        rows = _diversify(rows, k)
 
     out = [
         Retrieved(
