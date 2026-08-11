@@ -47,3 +47,7 @@ credentials
 # LongMemEval dataset (15MB) and run outputs
 bench/data/
 bench/results/
+
+# Lambda build artifacts
+.build/
+deploy/*.zip

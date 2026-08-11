@@ -57,7 +57,7 @@ from unsay.ingest import Claim, assert_claim  # noqa: E402
 
 log = logging.getLogger("longmemeval")
 
-DATA = pathlib.Path(__file__).parent / "data" / "longmemeval_oracle.json"
+DATA_DIR = pathlib.Path(__file__).parent / "data"
 RESULTS = pathlib.Path(__file__).parent / "results"
 
 # LongMemEval dates look like '2023/05/25 (Thu) 20:21'.
@@ -172,7 +172,8 @@ def extract_facts(session_text: str, *, attempts: int = 3) -> list[dict]:
     last = ""
     for attempt in range(1, attempts + 1):
         try:
-            raw = agent.call_json(EXTRACT_SYSTEM, context + session_text, max_tokens=1500)
+            raw = agent.call_json(EXTRACT_SYSTEM, context + session_text, max_tokens=1500,
+                                  model_id=settings().bedrock_extract_model_id)
             facts = raw.get("facts", [])
             out = [
                 f for f in facts
@@ -301,6 +302,10 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--split", default="oracle", choices=["oracle", "s"],
+                    help="oracle = evidence sessions only (easy). "
+                         "s = evidence buried in ~115k tokens of distractors, "
+                         "which is what the published baselines use.")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -311,7 +316,7 @@ def main() -> int:
         print("REFUSING: benchmark numbers from stub embeddings are meaningless.")
         return 2
 
-    data = json.load(open(DATA, encoding="utf-8"))
+    data = json.load(open(DATA_DIR / f"longmemeval_{args.split}.json", encoding="utf-8"))
     wanted = {t.strip() for t in args.types.split(",")}
     items = [d for d in data if d["question_type"] in wanted]
     if args.limit:

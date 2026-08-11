@@ -90,7 +90,8 @@ def _render(claims: list[memory.Retrieved]) -> str:
 
 
 def call_text(
-    system: str, prompt: str, *, max_tokens: int = 700, prefill: str | None = None
+    system: str, prompt: str, *, max_tokens: int = 700, prefill: str | None = None,
+    model_id: str | None = None,
 ) -> str:
     """One Bedrock Converse call, returning raw text.
 
@@ -108,7 +109,7 @@ def call_text(
         messages.append({"role": "assistant", "content": [{"text": prefill}]})
 
     resp = client().converse(
-        modelId=cfg.bedrock_model_id,
+        modelId=model_id or cfg.bedrock_model_id,
         system=[{"text": system}],
         messages=messages,
         inferenceConfig={"maxTokens": max_tokens, "temperature": 0.0},
@@ -117,7 +118,9 @@ def call_text(
     return ((prefill or "") + text).strip()
 
 
-def call_json(system: str, prompt: str, *, max_tokens: int = 700) -> dict[str, Any]:
+def call_json(
+    system: str, prompt: str, *, max_tokens: int = 700, model_id: str | None = None
+) -> dict[str, Any]:
     """As ``call_text``, parsing the reply as a JSON object.
 
     Prefilled with an opening brace so the model is continuing a JSON document
@@ -126,7 +129,7 @@ def call_json(system: str, prompt: str, *, max_tokens: int = 700) -> dict[str, A
     fails, and the caller sees an empty result that is indistinguishable from
     "nothing worth extracting".
     """
-    text = call_text(system, prompt, max_tokens=max_tokens, prefill="{")
+    text = call_text(system, prompt, max_tokens=max_tokens, prefill="{", model_id=model_id)
     match = re.search(r"\{.*\}", text, re.S)
     if not match:
         raise ValueError(f"model did not return JSON: {text[:200]}")

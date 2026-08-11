@@ -17,6 +17,7 @@ during a failover:
 from __future__ import annotations
 
 import logging
+import os
 import random
 import time
 from collections.abc import Callable, Iterator
@@ -46,11 +47,15 @@ _pool: ConnectionPool | None = None
 def pool() -> ConnectionPool:
     global _pool
     if _pool is None:
+        # Sized from the environment so a serverless deployment can keep the
+        # pool tiny. A frozen Lambda execution environment holds its
+        # connections open while doing nothing, and CockroachDB Cloud Basic
+        # caps concurrent connections, so the 2..16 default is wrong there.
         _pool = ConnectionPool(
             conninfo=settings().unsay_dsn,
-            min_size=2,
-            max_size=16,
-            kwargs={"row_factory": dict_row, "application_name": "recall"},
+            min_size=int(os.environ.get("UNSAY_POOL_MIN", "2")),
+            max_size=int(os.environ.get("UNSAY_POOL_MAX", "16")),
+            kwargs={"row_factory": dict_row, "application_name": "unsay"},
             open=True,
         )
     return _pool

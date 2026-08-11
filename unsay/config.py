@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # AWS
     aws_region: str = "us-east-1"
     bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    # Bulk mechanical work (turning chat turns into keyed facts) does not
+    # need the reasoning model, and extraction dominates benchmark cost by
+    # roughly 40:1 on call volume.
+    bedrock_extract_model_id: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     bedrock_embed_model_id: str = "amazon.titan-embed-text-v2:0"
     bedrock_embed_dim: int = 1024
     unsay_s3_bucket: str = ""
