@@ -1,15 +1,19 @@
-# Recall
+# Unsay
 
 **An AI medication-safety agent that goes back and un-says what it told you.**
 
-Ask it whether your prescription is safe and it answers from live FDA data. The
-part that matters comes later: when the FDA recalls that drug next Tuesday,
-Recall finds every person it already reassured, works out which of those
-answers are now wrong, and corrects them. Each one, by name, in seconds.
+Ask it whether your prescription is safe and it answers from live FDA data.
+The part that matters comes later: when the FDA recalls that drug next
+Tuesday, Unsay finds every person it already reassured, works out which of
+those answers are now wrong, and corrects them. Each one, by name, in seconds.
 
-That second half is impossible for every agent memory product on the market
-today, and it is impossible for a specific, structural reason. This README is
-mostly about that reason.
+Two claims, both demonstrated below rather than asserted:
+
+> **Other agent memories can tell you what they knew. Unsay goes back and
+> fixes what it said.**
+>
+> **And its replay still works in six months, when MVCC time-travel expired
+> after twenty-five hours.**
 
 ---
 
@@ -27,7 +31,7 @@ consequences or death.
 The gap is documented. A 2024 study at an academic medical center,
 [*Automating Individualized Notification of Drug Recalls to Patients*](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC12798837/),
 built a system to scan FDA recalls nightly and message affected patients
-through their EHR portal. It ran into two walls. Most recalls are Class II, so
+through their EHR portal. It hit two walls. Most recalls are Class II, so
 notification "stops with wholesalers and pharmacies rather than reaching
 patients." And critically: *"it was not possible to trace a medication
 prescription from the EHR to specific lot numbers dispensed to that patient by
@@ -38,7 +42,7 @@ either tell everybody or you tell nobody.
 
 ---
 
-## The one thing Recall does that nothing else can
+## Claim 1: repair, not just recall
 
 When the FDA publishes a recall, some number of answers already given are now
 wrong. They were correct when given. Nothing about them changed; the world
@@ -60,62 +64,60 @@ SELECT d.decision_id, d.answer, d.verdict
 Read it as English: *every answer still standing that leaned on a version of a
 claim we no longer believe.*
 
-**A vector database cannot express this query.** Not slowly, not approximately.
-It has no notion that a memory has versions, and no record of which version a
-given answer consumed. The most it can return is today's nearest neighbours,
-which tells you exactly nothing about what you said in March.
+**A vector database cannot express this query.** Not slowly, not
+approximately. It has no notion that a memory has versions, and no record of
+which version a given answer consumed. The most it can return is today's
+nearest neighbours, which tells you nothing about what you said in March.
 
-Mem0, Zep, Letta, and Pinecone all store what is true now. Recall stores what
-was true when, and what each answer stood on. That is a database problem, and
-it is why the memory layer here is CockroachDB rather than an index.
+Reconstructing history is an insight layer. Unsay closes the loop: each
+affected answer is re-decided against current memory, and where the verdict
+moves, a correction is drafted and a notification queued for a named person.
 
 ---
 
-## Why CockroachDB specifically
+## Claim 2: the replay does not expire
 
-Three properties, each load-bearing.
+The obvious way to build "what did the agent know when it decided" on
+CockroachDB is to store the read timestamp and replay it with
+`AS OF SYSTEM TIME`. It is elegant, needs no extra tables, and is correct right
+up until the garbage collector moves past the timestamp you saved.
 
-**1. Bitemporal claims.** Every safety claim carries two independent time
-axes. `valid_from`/`valid_to` is when it was true in the world. `asserted_at`/
-`retracted_at` is when this system believed it. Keeping them apart is what
-separates "the drug became dangerous on March 3rd" from "we found out on July
-2nd", which is the difference between an unlucky answer and a negligent one.
+CockroachDB's own documentation says so plainly: `gc.ttlseconds` *"is not meant
+to be a solution for long-term retention of history; for that you should
+handle versioning in the schema design at the application layer."* The default
+window is **4 hours**. **25 hours** is the largest value Cockroach Labs
+regularly tests.
 
-A claim is never updated in place. The version we believed is retracted and a
-new version is asserted beside it, in one transaction. Nothing a past decision
-read is ever mutated or deleted.
+So Unsay's durable mechanism is a **bitemporal schema**, which is what those
+docs prescribe. Every claim carries two independent time axes:
 
-**2. Provenance written atomically with the answer.** The decision row and its
-read set commit together or not at all. There is no code path that stores an
-answer without recording what produced it, because an answer whose provenance
-was lost can never be repaired, and a memory system that drops provenance under
-load effectively has none.
+- `valid_from` / `valid_to` — when the claim is true **in the world**
+- `asserted_at` / `retracted_at` — when **this system** believed it
 
-**3. Exactly-once correction across a region failure.** The correction, the
-status change, the outbox entry, and the audit line are one transaction. The
-outbox key is a deterministic hash of (decision, new verdict, triggering fact
-version), so a sweep killed halfway and restarted recomputes the identical key
-and the unique constraint turns the replay into a no-op.
+Keeping them apart is what separates "the drug became dangerous on March 3rd"
+from "we found out on July 2nd", which is the difference between an unlucky
+answer and a negligent one.
 
-"Zero duplicate patient notifications across a region failure" is therefore a
-property of the schema, not a hope about how the process exits.
+`AS OF SYSTEM TIME` remains as a fast path inside the window. `scripts/expiry.py`
+asks one question both ways and prints both answers:
 
-The cluster runs 9 nodes across 3 simulated AWS regions under
-`SURVIVE REGION FAILURE`, which places 5 replicas so no region holds a
-majority. Losing a whole region costs latency, never availability, and never a
-committed write.
+```
+question: what did this system believe about sartan lot 88, 45 days ago?
 
-### An honest note on `AS OF SYSTEM TIME`
+route A -- bitemporal reconstruction
+  ANSWERED: v1 [info] No open recall affects sartan lot 88.
 
-MVCC time-travel is the obvious way to build this, and it is the wrong
-mechanism. CockroachDB's own docs are explicit that `gc.ttlseconds` "is not
-meant to be a solution for long-term retention of history; for that you should
-handle versioning in the schema design at the application layer." The default
-window is 4 hours; 25 is the largest value Cockroach Labs regularly tests.
+route B -- MVCC time-travel (AS OF SYSTEM TIME at the same instant)
+  FAILED: batch timestamp ... must be after replica GC threshold ...
 
-So the durable mechanism is the bitemporal schema, which is exact and
-unbounded. `AS OF SYSTEM TIME` is a complementary fast path for same-day
-forensics, and the test suite asserts the two agree inside the window.
+control -- both routes at an instant inside the GC window
+  bitemporal: v[2]   MVCC: v[2]   agree: True
+```
+
+The control matters as much as the failure: inside the window the two agree
+exactly, so the bitemporal model is reconstructing real history rather than
+inventing a convenient one. Past the horizon, one route is gone and the other
+still answers.
 
 ---
 
@@ -145,26 +147,46 @@ forensics, and the test suite asserts the two agree inside the window.
                      signed audit exports
 ```
 
-Data residency is enforced by the storage layer, not by application code:
-`patient` is `REGIONAL BY ROW`, so an EU patient's memory lives in `eu-west-1`
-because CockroachDB puts it there.
+Three properties carry the design.
+
+**Provenance is written atomically with the answer.** The decision row and its
+read set commit together or not at all. There is no code path that stores an
+answer without recording what produced it, because an answer whose provenance
+was lost can never be repaired, and a memory system that drops provenance
+under load effectively has none.
+
+**Corrections are exactly-once across a region failure.** The correction, the
+status change, the outbox entry and the audit line are one transaction. The
+outbox key is a deterministic hash of (decision, new verdict, triggering fact
+version), so a sweep killed halfway and restarted recomputes the identical key
+and the unique constraint turns the replay into a no-op. "Zero duplicate
+patient notifications" is a property of the schema, not a hope about how the
+process exits.
+
+**Residency is enforced by storage, not by code.** `patient` is
+`REGIONAL BY ROW`, so an EU patient's memory lives in `eu-west-1` because
+CockroachDB puts it there.
+
+The cluster runs 9 nodes across 3 simulated AWS regions under
+`SURVIVE REGION FAILURE`, which places 5 replicas so no region holds a
+majority.
 
 ---
 
 ## CockroachDB tools used
 
-The hackathon requires two. Recall uses all four.
+The hackathon requires two.
 
 | Tool | How it is used | Status |
 |---|---|---|
 | **Distributed Vector Indexing** | `CREATE VECTOR INDEX fact_semantic ON fact (believed, embedding vector_cosine_ops)`. The `believed` prefix column is the point: without it a top-K search spends part of its budget on retracted claims that get filtered afterwards, so a query asking for 8 results quietly returns 3. Prefixing means all K neighbours come from claims currently held true. | live |
-| **Managed MCP Server** | The agent introspects live schema through `https://cockroachlabs.cloud/mcp` in read-only mode before generating SQL, which is Cockroach Labs' own stated fix for schema hallucination. | **in progress** |
-| **ccloud CLI** | Provisions the Cloud cluster, configures networking, and pulls audit logs. JSON output on every command is what makes it drivable by an agent rather than a person. | **in progress** |
 | **Agent Skills** | All 34 skills from [cockroachlabs/cockroachdb-skills](https://github.com/cockroachlabs/cockroachdb-skills) installed via `npx skills add`. `designing-application-transactions` was run against this codebase and found three real defects, listed below. | live |
+| **Managed MCP Server** | Read-only schema introspection through `https://cockroachlabs.cloud/mcp` before the agent generates SQL, which is Cockroach Labs' own stated fix for schema hallucination. | **in progress** |
+| **ccloud CLI** | Provisions the Cloud cluster, configures networking, pulls audit logs. | **in progress** |
 
-Status is stated per row on purpose. Anything marked "in progress" is not
-wired up yet, and this table is the single place to check what the artifact
-actually does versus what it is heading towards.
+Status is per row on purpose. Anything marked "in progress" is not wired up
+yet, and this table is the single place to check what the artifact does versus
+what it is heading towards.
 
 ### What the Agent Skills actually caught
 
@@ -172,46 +194,42 @@ Running `designing-application-transactions` against this repo found three
 defects that were really there, not three suggestions:
 
 1. **Read-modify-write on version numbers.** `assert_claim` did
-   `SELECT max(version)` and then `INSERT version+1` as two statements. Two
+   `SELECT max(version)` then `INSERT version+1` as two statements. Two
    ingesters racing on the same drug can both decide they are version N+1.
-   Fixed by computing the version inside the `INSERT ... SELECT` so the whole
-   decision happens in one statement.
-2. **`SELECT *` in `replay_decision`.** Replaced with explicit projections;
-   the table carries a 1024-dimension embedding that was being pulled over the
-   wire for no reason.
-3. **`LIMIT` without keyset pagination in the sweep.** A recall on a widely
-   dispensed drug implicates a large candidate set, and offset-style paging
+   Fixed by computing the version inside `INSERT ... SELECT`.
+2. **`SELECT *` in `replay_decision`**, pulling a 1024-dimension embedding over
+   the wire for no reason.
+3. **`LIMIT` without keyset pagination in the sweep.** Offset-style paging
    re-scans and discards everything already processed on each page. Now paged
    by `decision_id`, so the sweep starts correcting before it has finished
    enumerating.
 
-The first one was a genuine correctness bug under concurrency. The contention
-test below exists because the skill prompted it.
+The first was a genuine correctness bug under concurrency. The contention test
+below exists because the skill prompted it.
 
 ## AWS services used
 
-| Service | How it is used |
-|---|---|
-| **Amazon Bedrock** | Claude does the reasoning and picks its own citations. Titan Text Embeddings V2 produces the 1024-dimension vectors that `VECTOR(1024)` is sized for. |
-| **AWS Lambda** | Scheduled openFDA ingestion and change detection. A new fact version is what triggers a sweep. |
-| **Amazon S3** | Raw openFDA snapshots and signed audit exports. |
-| **Amazon EC2** | Hosts the 9-node cluster and the API. |
+| Service | How it is used | Status |
+|---|---|---|
+| **Amazon Bedrock** | Claude does the reasoning and picks its own citations. Titan Text Embeddings V2 produces the 1024-dimension vectors `VECTOR(1024)` is sized for. | **in progress** |
+| **AWS Lambda** | Scheduled openFDA ingestion and change detection. | planned |
+| **Amazon S3** | Raw openFDA snapshots and signed audit exports. | planned |
 
 ---
 
 ## The AI is the engine, not a commentator
 
 The model reads the retrieved claims, decides the verdict, writes the answer,
-and names which claims it actually leaned on. That last part is load-bearing:
-an answer can only be invalidated later by evidence the model itself said it
-used. Reads it was merely shown are recorded but marked non-load-bearing, so a
-change to background context does not spuriously invalidate an answer that
-never depended on it. That is what keeps a sweep from becoming spam.
+and names which claims it leaned on. That last part is load-bearing: an answer
+can only be invalidated later by evidence the model itself said it used. Reads
+it was merely shown are recorded but marked non-load-bearing, so a change to
+background context does not spuriously invalidate an answer that never
+depended on it. That is what keeps a sweep from becoming spam.
 
-There is exactly one guardrail around it: the model may not return `safe` while
-an active Class I or Class II recall for the same product sits in its context.
-The verdict is raised to `stop` and the override is logged. The model still
-writes the answer and picks the citations; it just cannot answer away a recall.
+One guardrail sits around it: the model may not return `safe` while an active
+Class I or Class II recall for the same product is in its context. The verdict
+is raised to `stop` and the override logged. The model still writes the answer
+and picks the citations; it just cannot answer away a recall.
 
 ---
 
@@ -226,7 +244,8 @@ Verified on a live 9-node, 3-region cluster:
 | Idempotency | Re-ingesting the identical 331 claims produced **0** new versions |
 | Sweep correctness | Standing answers built on superseded evidence found and reversed |
 | Exactly-once | Sweep replayed after completion; outbox still held exactly 1 notice |
-| Replay agreement | Bitemporal reconstruction and `AS OF SYSTEM TIME` returned identical read sets |
+| Replay agreement | Bitemporal reconstruction and `AS OF SYSTEM TIME` returned identical read sets inside the window |
+| **Replay durability** | At 45 days: bitemporal **answered exactly**, MVCC **failed** on the GC threshold |
 | Concurrent writes | 128 writers across 128 claims: **176.9 memory writes/sec**, 0 failures |
 | Worst-case contention | 64 writers, 16 racing on each of 4 claims: 0 failures, version chains dense at exactly v1..v16, exactly 1 believed version per claim, 0 orphaned provenance rows |
 
@@ -234,11 +253,19 @@ Idempotency matters more than it looks. openFDA refreshes weekly and most
 records are unchanged. An ingester that versioned on every pass would fire 331
 spurious sweeps and, at the far end, 331 spurious messages to patients.
 
-**Still to land before submission:** accuracy on the `knowledge-update` and
-`temporal-reasoning` subsets of [LongMemEval](https://github.com/xiaowu0162/LongMemEval)
-(ICLR 2025), against the published baselines of Zep at 63.8% and Mem0 at 49.0%.
-Those are the two categories that measure exactly what this design targets, and
-the benchmark is external rather than one I wrote, which is the point.
+**Which numbers used stub embeddings.** All of them, so far. The FDA records,
+the lot extraction, the versioning, the sweep, the exactly-once behaviour, the
+contention invariants and both replay routes are real and were measured on the
+live cluster. The *vectors* were not: every run to date set
+`UNSAY_ALLOW_FAKE_EMBEDDINGS=1`. The structural results hold exactly as
+stated, and no claim about **retrieval quality** has been earned yet.
+
+**Still to land:** re-ingestion against Bedrock Titan V2, then accuracy on the
+`knowledge-update` and `temporal-reasoning` subsets of
+[LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025) against
+the published baselines of Zep at 63.8% and Mem0 at 49.0%. Those are the two
+categories that measure exactly what this design targets, and the benchmark is
+external rather than one I wrote.
 
 ---
 
@@ -248,40 +275,38 @@ the benchmark is external rather than one I wrote, which is the point.
 docker compose up -d
 docker compose --profile init run --rm init
 
-docker exec -i <use1-1-container> cockroach sql --insecure < sql/001_bootstrap.sql
-docker exec -i <use1-1-container> cockroach sql --insecure < sql/002_schema.sql
-docker exec -i <use1-1-container> cockroach sql --insecure < sql/003_vector.sql
+docker exec -i cockroachdb-crdb-use1-1-1 cockroach sql --insecure < sql/001_bootstrap.sql
+docker exec -i cockroachdb-crdb-use1-1-1 cockroach sql --insecure < sql/002_schema.sql
+docker exec -i cockroachdb-crdb-use1-1-1 cockroach sql --insecure < sql/003_vector.sql
 
 python -m venv .venv && .venv/Scripts/pip install -e .
 cp .env.example .env      # then fill in AWS + CockroachDB Cloud values
 
-recall status
-recall ingest-recalls --since 2024-01-01
-recall ask "Is my valsartan safe to keep taking?" --subject valsartan
-recall sweep --dry-run
+unsay status
+unsay ingest-recalls --since 2024-01-01
+unsay ask "Is my valsartan safe to keep taking?" --subject valsartan
+unsay sweep --dry-run
 ```
 
 Kill a region mid-demo and watch answers keep flowing:
 
 ```bash
 docker compose stop crdb-euw1-1 crdb-euw1-2 crdb-euw1-3
-recall status          # eu-west-1 DOWN, survival goal holds
-recall sweep           # completes; outbox count does not double
+unsay status          # eu-west-1 DOWN, survival goal holds
+unsay sweep           # completes; outbox count does not double
 ```
 
-`scripts/smoke.py` walks the full lifecycle end to end and runs without AWS
-credentials via `RECALL_ALLOW_FAKE_EMBEDDINGS=1`. That switch is gated behind
-an environment variable and never a silent fallback, because retrieval quality
-under stub embeddings is meaningless.
+Evidence scripts, all runnable without AWS via `UNSAY_ALLOW_FAKE_EMBEDDINGS=1`:
 
-**Which of the numbers above used stub embeddings.** All of them, so far. The
-FDA records, the lot extraction, the versioning, the sweep, the exactly-once
-behaviour and both replay paths are real and were measured on the live
-9-node cluster. The *vectors* were not: every run to date set
-`RECALL_ALLOW_FAKE_EMBEDDINGS=1`. That means the structural results hold
-exactly as stated and no claim about **retrieval quality** has been earned
-yet. Re-ingestion against Bedrock Titan V2, and the LongMemEval run that
-depends on it, are the next things to land.
+| Script | Proves |
+|---|---|
+| `scripts/smoke.py` | The full lifecycle: assert, answer with provenance, supersede, sweep, correct, exactly-once |
+| `scripts/expiry.py` | Bitemporal replay outlives the GC window; MVCC replay does not |
+| `scripts/concurrency.py` | Version chains stay dense and singly-believed under N-way races |
+
+That stub-embedding switch is gated behind an environment variable and never a
+silent fallback, because retrieval quality under stub embeddings is
+meaningless.
 
 ---
 
@@ -291,21 +316,20 @@ Named plainly, because a safety tool that oversells itself is worse than none.
 
 - **Lot extraction is regex over free text.** openFDA writes lot numbers into
   prose, not a structured field. Recalls with no parsable lot fall back to
-  drug-level scope, which over-notifies rather than under-notifies. A
-  production build would reconcile against pharmacy dispensing records.
+  drug-level scope, which over-notifies rather than under-notifies.
 - **Dispensing data is synthetic.** Real pharmacy dispensing records are PHI
   and are not obtainable for a hackathon. The FDA side is entirely real and
   live; the patient side is generated.
 - **Not a medical device.** openFDA's own terms state the data is unvalidated
-  and must not be relied on for decisions regarding medical care. Recall drafts
+  and must not be relied on for decisions regarding medical care. Unsay drafts
   a correction for a pharmacist to review. It does not contact patients
   autonomously.
 - **`crdb_internal` is avoided.** v26.2 restricts it with a hint that it is
   unsupported in production. Cluster status is read through supported SQL and
   connection probes instead of setting `allow_unsafe_internals`.
-- **Region-failure survival needs a licence.** Free for companies under $10M
-  revenue via the CockroachDB Cloud console. Without it the schema still works
-  single-region.
+- **Region-failure survival needs a licence.** Enterprise Free, at no cost for
+  companies under $10M revenue, from the CockroachDB Cloud console. Without it
+  the schema still works single-region.
 
 ## Licence
 

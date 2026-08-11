@@ -17,8 +17,8 @@ from typing import Any
 
 import psycopg
 
-from recall import embeddings
-from recall.db import query, query_as_of, run_in_txn
+from unsay import embeddings
+from unsay.db import query, query_as_of, run_in_txn
 
 log = logging.getLogger(__name__)
 
@@ -242,7 +242,7 @@ def replay_via_mvcc(decision_id: str) -> list[dict]:
     """The same reconstruction taken straight from MVCC, via AS OF SYSTEM TIME.
 
     Exact and requiring no bitemporal bookkeeping at all, but only valid inside
-    the garbage-collection window (25 hours here). Recall uses this as a fast
+    the garbage-collection window (25 hours here). Unsay uses this as a fast
     path for same-day forensics and relies on ``facts_as_believed_at`` beyond
     it. Both should agree inside the window, and the test suite asserts that.
     """

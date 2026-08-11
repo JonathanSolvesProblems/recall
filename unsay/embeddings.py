@@ -18,7 +18,7 @@ import struct
 import boto3
 from botocore.config import Config
 
-from recall.config import settings
+from unsay.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ def embed(text: str) -> list[float]:
     """Embed one string. Returns a 1024-dimension unit vector."""
     cfg = settings()
 
-    if os.environ.get("RECALL_ALLOW_FAKE_EMBEDDINGS") == "1":
+    if os.environ.get("UNSAY_ALLOW_FAKE_EMBEDDINGS") == "1":
         return _deterministic_stub(text, cfg.bedrock_embed_dim)
 
     body = json.dumps(

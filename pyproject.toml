@@ -1,5 +1,5 @@
 [project]
-name = "recall"
+name = "unsay"
 version = "0.1.0"
 description = "Agent memory that can take back what it said: bitemporal drug-safety memory on CockroachDB"
 readme = "README.md"
@@ -27,14 +27,14 @@ dev = [
 ]
 
 [project.scripts]
-recall = "recall.cli:app"
+unsay = "unsay.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["recall"]
+packages = ["unsay"]
 
 [tool.ruff]
 line-length = 100

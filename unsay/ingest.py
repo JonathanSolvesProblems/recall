@@ -1,6 +1,6 @@
 """Turning openFDA records into bitemporal safety claims.
 
-The whole of Recall's behaviour rests on one rule enforced here: a claim is
+The whole of Unsay's behaviour rests on one rule enforced here: a claim is
 never updated in place. When the world changes, the version we believed is
 retracted and a new version is asserted beside it. Nothing that any past
 decision read is ever mutated or deleted.
@@ -21,8 +21,8 @@ from typing import Any
 
 import psycopg
 
-from recall import embeddings, openfda
-from recall.db import run_in_txn
+from unsay import embeddings, openfda
+from unsay.db import run_in_txn
 
 log = logging.getLogger(__name__)
 

@@ -1,12 +1,12 @@
--- Recall :: vector indexes and data residency
+-- Unsay :: vector indexes and data residency
 --
---   cockroach sql --insecure --host=localhost:26257 -d recall -f sql/003_vector.sql
+--   cockroach sql --insecure --host=localhost:26257 -d unsay -f sql/003_vector.sql
 --
 -- Kept separate from 002 because CockroachDB cannot run IMPORT INTO against a
 -- table that already carries a vector index, and large batch inserts of VECTOR
 -- values degrade while one is present. Bulk-load facts first, then run this.
 
-USE recall;
+USE unsay;
 
 -- ---------------------------------------------------------------------------
 -- Semantic retrieval over safety claims.

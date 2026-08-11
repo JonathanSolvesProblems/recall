@@ -1,6 +1,6 @@
 """Contention test: many agents writing the same memory at once.
 
-    RECALL_ALLOW_FAKE_EMBEDDINGS=1 python scripts/concurrency.py [writers] [keys]
+    UNSAY_ALLOW_FAKE_EMBEDDINGS=1 python scripts/concurrency.py [writers] [keys]
 
 The hackathon's premise is thousands of agents writing memory concurrently, and
 Cockroach Labs' own framing is that agents "spawn autonomously, write
@@ -25,15 +25,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("RECALL_ALLOW_FAKE_EMBEDDINGS", "1")
+os.environ.setdefault("UNSAY_ALLOW_FAKE_EMBEDDINGS", "1")
 
 import logging  # noqa: E402
 
-from recall import embeddings  # noqa: E402
-from recall.db import close_pool, pool, query, run_in_txn  # noqa: E402
-from recall.ingest import Claim, assert_claim  # noqa: E402
+from unsay import embeddings  # noqa: E402
+from unsay.db import close_pool, pool, query, run_in_txn  # noqa: E402
+from unsay.ingest import Claim, assert_claim  # noqa: E402
 
-logging.getLogger("recall.db").setLevel(logging.ERROR)  # retries are expected here
+logging.getLogger("unsay.db").setLevel(logging.ERROR)  # retries are expected here
 
 
 def writer(key: str, n: int) -> tuple[int, bool]:

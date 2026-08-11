@@ -22,8 +22,8 @@ from typing import Any
 import boto3
 from botocore.config import Config
 
-from recall import memory, sweep
-from recall.config import settings
+from unsay import memory, sweep
+from unsay.config import settings
 
 log = logging.getLogger(__name__)
 

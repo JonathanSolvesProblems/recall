@@ -1,6 +1,6 @@
 """End-to-end exercise of the flagship path against a live cluster.
 
-    RECALL_ALLOW_FAKE_EMBEDDINGS=1 python scripts/smoke.py
+    UNSAY_ALLOW_FAKE_EMBEDDINGS=1 python scripts/smoke.py
 
 Walks the full lifecycle: assert a claim, answer a question against it with
 provenance, let the world change, sweep, and verify the correction plus
@@ -14,11 +14,11 @@ import sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("RECALL_ALLOW_FAKE_EMBEDDINGS", "1")
+os.environ.setdefault("UNSAY_ALLOW_FAKE_EMBEDDINGS", "1")
 
-from recall import embeddings, memory, sweep  # noqa: E402
-from recall.db import close_pool, query, run_in_txn  # noqa: E402
-from recall.ingest import Claim, assert_claim  # noqa: E402
+from unsay import embeddings, memory, sweep  # noqa: E402
+from unsay.db import close_pool, query, run_in_txn  # noqa: E402
+from unsay.ingest import Claim, assert_claim  # noqa: E402
 
 OK = "  [ok]"
 

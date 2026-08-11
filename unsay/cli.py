@@ -1,4 +1,4 @@
-"""Command line for driving Recall, including the live demo."""
+"""Command line for driving Unsay, including the live demo."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from recall import ingest, memory, sweep
-from recall.db import close_pool, query
+from unsay import ingest, memory, sweep
+from unsay.db import close_pool, query
 
 app = typer.Typer(add_completion=False, help="Agent memory that can take back what it said.")
 console = Console()
@@ -23,9 +23,9 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 # actually up. The application itself never targets a specific region; this is
 # purely so the demo can show a region gone while answers keep flowing.
 REGION_PROBES = {
-    "us-east-1": "postgresql://root@localhost:26257/recall?sslmode=disable&connect_timeout=2",
-    "us-west-2": "postgresql://root@localhost:26258/recall?sslmode=disable&connect_timeout=2",
-    "eu-west-1": "postgresql://root@localhost:26259/recall?sslmode=disable&connect_timeout=2",
+    "us-east-1": "postgresql://root@localhost:26257/unsay?sslmode=disable&connect_timeout=2",
+    "us-west-2": "postgresql://root@localhost:26258/unsay?sslmode=disable&connect_timeout=2",
+    "eu-west-1": "postgresql://root@localhost:26259/unsay?sslmode=disable&connect_timeout=2",
 }
 
 
@@ -39,7 +39,7 @@ def status() -> None:
     """
     import psycopg
 
-    regions = query("SHOW REGIONS FROM DATABASE recall")
+    regions = query("SHOW REGIONS FROM DATABASE unsay")
     t = Table(title="topology")
     for col in ("region", "zones", "primary", "reachable"):
         t.add_column(col)
@@ -65,7 +65,7 @@ def status() -> None:
         )
     console.print(t)
 
-    goal = query("SHOW SURVIVAL GOAL FROM DATABASE recall")[0]["survival_goal"]
+    goal = query("SHOW SURVIVAL GOAL FROM DATABASE unsay")[0]["survival_goal"]
     console.print(f"survival goal: [bold]{goal}[/bold]    regions up: {live}/{len(regions)}")
 
     counts = query(
@@ -122,7 +122,7 @@ def ask(
     patient: str | None = typer.Option(None, help="Patient UUID."),
 ) -> None:
     """Ask the agent a question. Requires AWS credentials for Bedrock."""
-    from recall import agent
+    from unsay import agent
 
     result = agent.ask(question, subject_id=subject, patient_id=patient)
     console.print(f"[bold]{result.verdict.upper()}[/bold]  ({result.confidence:.2f})")
@@ -171,7 +171,7 @@ def run_sweep(
         close_pool()
         return
 
-    from recall import agent
+    from unsay import agent
 
     started = time.time()
     summary = sweep.run_sweep(

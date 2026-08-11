@@ -27,7 +27,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from recall.config import settings
+from unsay.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ def pool() -> ConnectionPool:
     global _pool
     if _pool is None:
         _pool = ConnectionPool(
-            conninfo=settings().recall_dsn,
+            conninfo=settings().unsay_dsn,
             min_size=2,
             max_size=16,
             kwargs={"row_factory": dict_row, "application_name": "recall"},
@@ -122,7 +122,7 @@ def query_as_of(
     Only valid inside the garbage-collection window (25 hours as configured in
     sql/001_bootstrap.sql). Outside it, reconstruct the same state from the
     bitemporal columns on `fact` instead, which is exact and unbounded. See
-    ``recall.memory.facts_as_believed_at``.
+    ``unsay.memory.facts_as_believed_at``.
 
     AS OF SYSTEM TIME does not accept placeholders, so the timestamp is
     interpolated. It is validated as a decimal literal first.

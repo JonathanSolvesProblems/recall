@@ -13,11 +13,11 @@ class Settings(BaseSettings):
     )
 
     # CockroachDB
-    recall_dsn: str = (
+    unsay_dsn: str = (
         "postgresql://root@localhost:26257,localhost:26258,localhost:26259"
-        "/recall?sslmode=disable"
+        "/unsay?sslmode=disable"
     )
-    recall_cloud_dsn: str = ""
+    unsay_cloud_dsn: str = ""
 
     # Managed MCP Server
     crdb_mcp_endpoint: str = "https://cockroachlabs.cloud/mcp"
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
     bedrock_embed_model_id: str = "amazon.titan-embed-text-v2:0"
     bedrock_embed_dim: int = 1024
-    recall_s3_bucket: str = ""
+    unsay_s3_bucket: str = ""
 
     # Ingestion
     openfda_api_key: str = ""

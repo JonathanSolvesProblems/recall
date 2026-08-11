@@ -1,13 +1,13 @@
--- Recall :: agent memory schema
+-- Unsay :: agent memory schema
 --
---   cockroach sql --insecure --host=localhost:26257 -d recall -f sql/002_schema.sql
+--   cockroach sql --insecure --host=localhost:26257 -d unsay -f sql/002_schema.sql
 --
 -- The design in one sentence: every safety claim is versioned in two time
 -- dimensions, every agent decision records exactly which claim versions it
 -- read, and those two facts together make it possible to go back and repair
 -- answers that were correct when given and are wrong now.
 
-USE recall;
+USE unsay;
 
 -- ===========================================================================
 -- 1. FACTS :: bitemporal store of drug-safety claims
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS patient (
 -- notification (Automating Individualized Notification of Drug Recalls to
 -- Patients, 2024) failed precisely here: "it was not possible to trace a
 -- medication prescription from the EHR to specific lot numbers dispensed to
--- that patient by a community pharmacy." Recall carries the lot end to end,
+-- that patient by a community pharmacy." Unsay carries the lot end to end,
 -- so a lot-scoped recall resolves to named people instead of a whole drug.
 CREATE TABLE IF NOT EXISTS dispense (
     dispense_id  UUID        NOT NULL DEFAULT gen_random_uuid(),

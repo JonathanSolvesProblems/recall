@@ -15,7 +15,7 @@ Everything else is supporting and gets cut before that gets cut.
 ## Shot list
 
 ### 0:00 - 0:10 | The ordinary thing
-**Screen:** the Recall web UI. A patient question typed in plain language.
+**Screen:** the Unsay web UI. A patient question typed in plain language.
 
 > "Margaret asks the pharmacy whether her blood-pressure tablets are still
 > safe to take. The agent checks, and says yes."
@@ -61,7 +61,7 @@ over it.
 
 > "Halfway through, I take out an entire AWS region."
 
-**Screen:** `recall status`, eu-west-1 DOWN, survival goal holds. Sweep
+**Screen:** `unsay status`, eu-west-1 DOWN, survival goal holds. Sweep
 continues in the other pane.
 
 > "The sweep finishes. No memory lost, no answer half-corrected."
@@ -73,15 +73,24 @@ continues in the other pane.
 > database refuses the duplicate."
 
 ### 1:12 - 1:25 | The receipt
-**Screen:** `recall replay <decision_id>`.
+**Screen:** `unsay replay <decision_id>`.
 
-> "And for any answer it ever gave, it can show exactly what it knew at the
-> moment it decided, and what has moved since."
+> "For any answer it ever gave, it can show exactly what it knew at the moment
+> it decided, and what has moved since."
 
 Evidence table: v1 as read, v2 now, SUPERSEDED in red.
 
+**Screen:** `scripts/expiry.py` output, both routes side by side.
+
+> "Plenty of projects can replay a decision. They do it with time-travel
+> queries, which expire after twenty-five hours. Ask this one what it believed
+> forty-five days ago and it still answers."
+
+*Hold on the two lines: bitemporal ANSWERED, MVCC FAILED. Five seconds, no
+narration over it.*
+
 ### 1:25 - 1:32 | Close
-> "Recall. Agent memory that can take back what it said. Built on CockroachDB
+> "Unsay. Agent memory that can take back what it said. Built on CockroachDB
 > because remembering is easy, and knowing when you were wrong is a database
 > problem."
 

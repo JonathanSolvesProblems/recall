@@ -1,6 +1,6 @@
 """Retroactive invalidation: going back and repairing answers that have gone wrong.
 
-This is the part of Recall that no vector store can do, and the reason the
+This is the part of Unsay that no vector store can do, and the reason the
 memory layer is a database rather than an index.
 
 When the FDA publishes a recall, some number of answers already given are now
@@ -26,7 +26,7 @@ from typing import Any, Callable
 
 import psycopg
 
-from recall.db import query, run_in_txn
+from unsay.db import query, run_in_txn
 
 log = logging.getLogger(__name__)
 

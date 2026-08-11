@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from recall.config import settings
+from unsay.config import settings
 
 log = logging.getLogger(__name__)
 
