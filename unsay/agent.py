@@ -89,27 +89,44 @@ def _render(claims: list[memory.Retrieved]) -> str:
     return "\n".join(lines)
 
 
-def call_text(system: str, prompt: str, *, max_tokens: int = 700) -> str:
+def call_text(
+    system: str, prompt: str, *, max_tokens: int = 700, prefill: str | None = None
+) -> str:
     """One Bedrock Converse call, returning raw text.
 
     Temperature is pinned at 0. A safety verdict that changes between identical
     runs is not a verdict, and a benchmark that does the same is not a
     measurement.
+
+    ``prefill`` seeds the assistant turn. Continuing a reply is a much stronger
+    constraint than instructing one, which matters when the caller needs a
+    machine-readable answer rather than a conversational one.
     """
     cfg = settings()
+    messages: list[dict[str, Any]] = [{"role": "user", "content": [{"text": prompt}]}]
+    if prefill:
+        messages.append({"role": "assistant", "content": [{"text": prefill}]})
+
     resp = client().converse(
         modelId=cfg.bedrock_model_id,
         system=[{"text": system}],
-        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        messages=messages,
         inferenceConfig={"maxTokens": max_tokens, "temperature": 0.0},
     )
-    return resp["output"]["message"]["content"][0]["text"].strip()
+    text = resp["output"]["message"]["content"][0]["text"]
+    return ((prefill or "") + text).strip()
 
 
 def call_json(system: str, prompt: str, *, max_tokens: int = 700) -> dict[str, Any]:
-    """As ``call_text``, parsing the reply as a JSON object."""
-    text = call_text(system, prompt, max_tokens=max_tokens)
-    # Models occasionally wrap JSON in a fence despite instructions.
+    """As ``call_text``, parsing the reply as a JSON object.
+
+    Prefilled with an opening brace so the model is continuing a JSON document
+    rather than deciding whether to write one. Without this, a session that
+    reads like an invitation to chat gets a conversational reply, the parse
+    fails, and the caller sees an empty result that is indistinguishable from
+    "nothing worth extracting".
+    """
+    text = call_text(system, prompt, max_tokens=max_tokens, prefill="{")
     match = re.search(r"\{.*\}", text, re.S)
     if not match:
         raise ValueError(f"model did not return JSON: {text[:200]}")

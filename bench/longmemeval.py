@@ -52,7 +52,7 @@ os.environ["UNSAY_DSN"] = os.environ.get("UNSAY_BENCH_DSN", _DEFAULT_BENCH_DSN)
 
 from unsay import agent, embeddings, memory  # noqa: E402
 from unsay.config import settings  # noqa: E402
-from unsay.db import close_pool, run_in_txn  # noqa: E402
+from unsay.db import close_pool, query, run_in_txn  # noqa: E402
 from unsay.ingest import Claim, assert_claim  # noqa: E402
 
 log = logging.getLogger("longmemeval")
@@ -81,8 +81,13 @@ a later session revising the same attribute produces the SAME key:
   bad:  "ran_5k_in_27_minutes"     (encodes the value, so an update looks like a new fact)
   bad:  "fitness"                  (too broad, unrelated facts collide)
 
-Use lower_snake_case, specific but value-free. If the session revises something
-stated earlier, reuse the key it would have had. Emit [] if nothing is durable."""
+Use lower_snake_case, specific but value-free. Emit [] if nothing is durable.
+
+You will be shown KNOWN KEYS: attributes already recorded for this user. If
+this session updates, corrects or refines one of them, you MUST reuse that
+exact key. Reusing it is what lets the newer claim supersede the older one.
+Inventing a near-synonym instead leaves both versions live and the stale one
+can win. Only mint a new key for an attribute genuinely not in the list."""
 
 
 def parse_date(s: str) -> datetime:
@@ -99,18 +104,89 @@ def render_session(turns: list[dict]) -> str:
     )[:14000]
 
 
-def extract_facts(session_text: str) -> list[dict]:
-    """One Bedrock call per session, turning turns into keyed claims."""
-    try:
-        raw = agent.call_json(EXTRACT_SYSTEM, session_text, max_tokens=1200)
-    except Exception as exc:
-        log.warning("extraction failed: %s", str(exc)[:120])
-        return []
-    facts = raw.get("facts", [])
+# Sessions whose facts never reached the store. Counted, never swallowed: an
+# extraction failure that returns [] is indistinguishable from a session with
+# nothing worth remembering, and the benchmark then scores an ingestion bug as
+# a memory failure. In the first pilot this cost a knowledge-update instance
+# whose updating session simply never landed.
+EXTRACT_FAILURES: list[str] = []
+
+
+def known_keys() -> list[tuple[str, str]]:
+    """Attributes already recorded, newest believed version of each."""
     return [
-        f for f in facts
-        if isinstance(f, dict) and f.get("key") and f.get("claim")
+        (r["fact_key"].removeprefix("lme:"), r["claim"])
+        for r in query(
+            """
+            SELECT fact_key, claim FROM fact
+             WHERE source = %s AND believed
+             ORDER BY fact_key
+            """,
+            (BENCH_SOURCE,),
+        )
     ]
+
+
+def canonical_key(proposed: str, existing: list[str]) -> str:
+    """Snap a proposed key onto an existing one when it is a refinement of it.
+
+    Instructing the model to reuse keys is necessary but not sufficient. Asked
+    to record a new family-trip destination against a known
+    `recent_family_trip_destination`, it emitted
+    `recent_family_trip_destination_paris`: a near-synonym that encodes the
+    value in the key, so the two claims sit side by side and the stale one can
+    still be retrieved.
+
+    A qualifier appended to a known attribute is a new value for that
+    attribute, not a new attribute, so the extension is dropped. Enforced here
+    rather than asked for, because a constraint the code can guarantee should
+    not be delegated to a prompt.
+
+    The tradeoff is deliberate: a genuine sub-attribute whose name extends a
+    parent (`car_make_model` and `car_make_model_second_car`) merges too. In
+    this corpus value-encoding is far commoner than true nesting, and merging
+    costs a distinction while not merging costs a wrong answer.
+    """
+    if proposed in existing:
+        return proposed
+    matches = [e for e in existing if proposed.startswith(e + "_")]
+    return max(matches, key=len) if matches else proposed
+
+
+def extract_facts(session_text: str, *, attempts: int = 3) -> list[dict]:
+    """One Bedrock call per session, turning turns into keyed claims.
+
+    Extraction is memory-aware. Shown the keys already on file, the model can
+    reuse one when a session revises that attribute, which is what makes the
+    new claim supersede the old rather than sit beside it. Without this the
+    same attribute acquires a fresh synonym key per session and the store
+    becomes additive, which is the failure mode this design exists to avoid.
+    """
+    known = known_keys()
+    context = ""
+    if known:
+        listed = "\n".join(f"  {k}: {c[:90]}" for k, c in known[:60])
+        context = f"KNOWN KEYS (reuse when this session updates one):\n{listed}\n\n"
+
+    existing = [k for k, _ in known]
+    last = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            raw = agent.call_json(EXTRACT_SYSTEM, context + session_text, max_tokens=1500)
+            facts = raw.get("facts", [])
+            out = [
+                f for f in facts
+                if isinstance(f, dict) and f.get("key") and f.get("claim")
+            ]
+            for f in out:
+                f["key"] = canonical_key(f["key"], existing)
+            return out
+        except Exception as exc:
+            last = str(exc)[:140]
+            log.warning("extraction attempt %d/%d failed: %s", attempt, attempts, last)
+
+    EXTRACT_FAILURES.append(last)
+    return []
 
 
 BENCH_SOURCE = "longmemeval"
@@ -145,12 +221,15 @@ def load_instance(inst: dict, workers: int) -> int:
     sessions = list(zip(inst["haystack_dates"], inst["haystack_sessions"]))
     sessions.sort(key=lambda p: parse_date(p[0]))
 
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        extracted = list(ex.map(lambda p: extract_facts(render_session(p[1])), sessions))
-
     total = 0
-    for (date_str, _), facts in zip(sessions, extracted):
+    # Sessions are processed strictly in order and one at a time, because each
+    # extraction is shown the keys the previous ones stored. Parallelising the
+    # extractions would mean every session sees an empty key list and invents
+    # its own naming, which is the bug this ordering fixes. Embedding within a
+    # session is still concurrent.
+    for date_str, turns in sessions:
         when = parse_date(date_str)
+        facts = extract_facts(render_session(turns))
         if not facts:
             continue
         with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -262,6 +341,14 @@ def main() -> int:
                   f"gold={str(inst['answer'])[:34]:36s} got={hyp[:42]}")
 
     print(f"\n{len(items)} answered in {time.time() - started:.0f}s -> {out}")
+    if EXTRACT_FAILURES:
+        print(f"\nWARNING: {len(EXTRACT_FAILURES)} session(s) failed extraction after "
+              f"retries. Those instances measure ingestion, not memory, and their "
+              f"results are not trustworthy:")
+        for f in EXTRACT_FAILURES[:5]:
+            print(f"  {f}")
+    else:
+        print("all sessions extracted cleanly")
     print("\nGrade with the official evaluator (GPT-4o judge, as published):")
     print("  git clone https://github.com/xiaowu0162/LongMemEval && cd LongMemEval/src/evaluation")
     print(f"  python3 evaluate_qa.py gpt-4o {out} ../../data/longmemeval_oracle.json")
