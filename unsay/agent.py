@@ -126,19 +126,39 @@ def _invoke(prompt: str) -> dict[str, Any]:
 BLOCKING = {"class_i", "class_ii"}
 
 
-def _clamp(verdict: str, claims: list[memory.Retrieved], cited: set[str]) -> tuple[str, str | None]:
+SEVERITY_WORDS = {"class_i": "Class I", "class_ii": "Class II"}
+
+
+def _clamp(
+    verdict: str, claims: list[memory.Retrieved]
+) -> tuple[str, list[memory.Retrieved]]:
     """Refuse to let a reassuring verdict stand over an active serious recall.
 
-    Returns the possibly-corrected verdict and a note when it was overridden.
+    Returns the possibly-corrected verdict and the claims that forced it.
     This is a guardrail on the model, not a replacement for it: the model still
     writes the answer and picks the citations. It just cannot say "safe" while
     a Class I recall for the same product is sitting in front of it.
     """
     serious = [c for c in claims if c.severity in BLOCKING and c.valid_to is None]
     if serious and verdict in {"safe", "unknown"}:
-        keys = ", ".join(c.fact_key for c in serious[:3])
-        return "stop", f"verdict raised to stop: active {serious[0].severity} claim ({keys})"
-    return verdict, None
+        return "stop", serious
+    return verdict, []
+
+
+def _stop_lead(serious: list[memory.Retrieved]) -> str:
+    """The sentence an overridden answer has to open with.
+
+    When the clamp fires, the model has usually written something hedged, and
+    hedged prose under a STOP verdict is the worst of both: the reader takes
+    the tone, not the label. The directive goes first, and the model's own
+    wording follows it as detail.
+    """
+    worst = min(serious, key=lambda c: 0 if c.severity == "class_i" else 1)
+    label = SEVERITY_WORDS.get(worst.severity, "safety")
+    return (
+        f"Stop using this product and contact your pharmacy. An active {label} "
+        f"recall applies to it."
+    )
 
 
 def ask(
@@ -159,16 +179,26 @@ def ask(
     known = {c.fact_key for c in claims}
     cited &= known
 
-    verdict, override = _clamp(verdict, claims, cited)
-    if override:
-        log.warning("%s", override)
-        cited |= {c.fact_key for c in claims if c.severity in BLOCKING and c.valid_to is None}
+    answer_text = str(raw.get("answer", "")).strip()
+    confidence = float(raw.get("confidence", 0.0))
+
+    verdict, forced = _clamp(verdict, claims)
+    if forced:
+        keys = ", ".join(c.fact_key for c in forced[:3])
+        log.warning("verdict raised to stop: active %s claim (%s)", forced[0].severity, keys)
+        # The claims that forced the override are load-bearing by definition:
+        # they are the reason the verdict is what it is, so a later change to
+        # any of them must put this answer back in the sweep.
+        cited |= {c.fact_key for c in forced}
+        answer_text = f"{_stop_lead(forced)} {answer_text}".strip()
+        # The model's own confidence described a verdict it no longer holds.
+        confidence = max(confidence, 0.9)
 
     result = Answer(
         verdict=verdict,
-        answer=str(raw.get("answer", "")).strip(),
+        answer=answer_text,
         cited=cited,
-        confidence=float(raw.get("confidence", 0.0)),
+        confidence=confidence,
     )
 
     if persist:

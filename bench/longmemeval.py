@@ -40,6 +40,16 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Point at a dedicated database BEFORE unsay.config is imported, since settings
+# are cached on first read. The benchmark needs a corpus containing only the
+# instance under test: any other claim in the table is a distractor that would
+# quietly change the measurement.
+_DEFAULT_BENCH_DSN = (
+    "postgresql://root@localhost:26257,localhost:26258,localhost:26259"
+    "/unsay_bench?sslmode=disable"
+)
+os.environ["UNSAY_DSN"] = os.environ.get("UNSAY_BENCH_DSN", _DEFAULT_BENCH_DSN)
+
 from unsay import agent, embeddings, memory  # noqa: E402
 from unsay.config import settings  # noqa: E402
 from unsay.db import close_pool, run_in_txn  # noqa: E402
@@ -103,11 +113,25 @@ def extract_facts(session_text: str) -> list[dict]:
     ]
 
 
+BENCH_SOURCE = "longmemeval"
+
+
 def wipe() -> None:
+    """Clear the previous instance's history.
+
+    Scoped to this benchmark's own rows even though it runs against a separate
+    database. An earlier version deleted the whole `fact` table and, sharing a
+    database with the openFDA corpus at the time, destroyed it. Isolation by
+    convention is not isolation; the WHERE clause is the actual guarantee.
+    """
     def work(conn):
-        conn.execute("DELETE FROM decision_read")
-        conn.execute("DELETE FROM decision")
-        conn.execute("DELETE FROM fact")
+        conn.execute(
+            "DELETE FROM decision_read WHERE fact_key LIKE 'lme:%%'"
+        )
+        conn.execute(
+            "DELETE FROM decision WHERE model_id = %s", (BENCH_SOURCE,)
+        )
+        conn.execute("DELETE FROM fact WHERE source = %s", (BENCH_SOURCE,))
     run_in_txn(work, label="bench_wipe")
 
 
