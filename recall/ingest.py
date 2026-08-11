@@ -227,36 +227,45 @@ def assert_claim(conn: psycopg.Connection, claim: Claim, vector: list[float]) ->
     if current and current["content_hash"] == claim.content_hash:
         return current["version"], False
 
-    highest = conn.execute(
-        "SELECT coalesce(max(version), 0) AS v FROM fact WHERE fact_key = %s",
-        (claim.fact_key,),
-    ).fetchone()["v"]
-    next_version = highest + 1
-
-    # Retract what we believed, in the same transaction as asserting its
-    # replacement. There is no instant at which the memory holds both or
-    # neither, which is what stops a concurrent reader seeing a gap.
-    if current:
-        conn.execute(
-            "UPDATE fact SET retracted_at = now() WHERE fact_key = %s AND version = %s",
-            (claim.fact_key, current["version"]),
-        )
-
+    # Retract whatever is currently believed, in the same transaction as
+    # asserting its replacement. There is no instant at which the memory holds
+    # both or neither, which is what stops a concurrent reader seeing a gap.
+    #
+    # Predicated on `retracted_at IS NULL` rather than on a version number read
+    # a moment ago: the set of believed versions is decided by the database at
+    # write time, not by a value this process cached.
     conn.execute(
+        "UPDATE fact SET retracted_at = now() WHERE fact_key = %s AND retracted_at IS NULL",
+        (claim.fact_key,),
+    )
+
+    # The version number is computed inside the INSERT rather than by a
+    # separate SELECT. A read-modify-write across two statements lets two
+    # concurrent ingesters of the same drug both decide they are version N+1;
+    # under SERIALIZABLE that surfaces as a retryable conflict, but only if
+    # nothing in between has already committed a duplicate primary key.
+    # Computing it in SQL keeps the whole decision inside one statement.
+    row = conn.execute(
         """
         INSERT INTO fact (fact_key, version, subject_kind, subject_id, predicate,
                           claim, severity, payload, valid_from, valid_to,
                           source, source_ref, content_hash, embedding)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::JSONB, %s, %s, %s, %s, %s, %s::VECTOR)
+        SELECT %s, coalesce(max(f.version), 0) + 1, %s, %s, %s, %s, %s, %s::JSONB,
+               %s, %s, %s, %s, %s, %s::VECTOR
+          FROM fact f
+         WHERE f.fact_key = %s
+        RETURNING version
         """,
         (
-            claim.fact_key, next_version, claim.subject_kind, claim.subject_id,
+            claim.fact_key, claim.subject_kind, claim.subject_id,
             claim.predicate, claim.claim, claim.severity,
             json.dumps(claim.payload),
             claim.valid_from, claim.valid_to, claim.source, claim.source_ref,
             claim.content_hash, embeddings.to_sql(vector),
+            claim.fact_key,
         ),
-    )
+    ).fetchone()
+    next_version = row["version"]
 
     conn.execute(
         """

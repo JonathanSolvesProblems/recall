@@ -32,3 +32,7 @@ Thumbs.db
 
 # Cluster state
 cockroach-data/
+
+# Agent Skills are installed via `npx skills add cockroachlabs/cockroachdb-skills`
+.agents/
+.claude/skills/

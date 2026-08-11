@@ -160,11 +160,33 @@ The hackathon requires two. Recall uses all four.
 | **Distributed Vector Indexing** | `CREATE VECTOR INDEX fact_semantic ON fact (believed, embedding vector_cosine_ops)`. The `believed` prefix column is the point: without it a top-K search spends part of its budget on retracted claims that get filtered afterwards, so a query asking for 8 results quietly returns 3. Prefixing means all K neighbours come from claims currently held true. | live |
 | **Managed MCP Server** | The agent introspects live schema through `https://cockroachlabs.cloud/mcp` in read-only mode before generating SQL, which is Cockroach Labs' own stated fix for schema hallucination. | **in progress** |
 | **ccloud CLI** | Provisions the Cloud cluster, configures networking, and pulls audit logs. JSON output on every command is what makes it drivable by an agent rather than a person. | **in progress** |
-| **Agent Skills** | [cockroachlabs/cockroachdb-skills](https://github.com/cockroachlabs/cockroachdb-skills) vendored into `.claude/skills/`, driving schema-design and performance review of this repo. | **in progress** |
+| **Agent Skills** | All 34 skills from [cockroachlabs/cockroachdb-skills](https://github.com/cockroachlabs/cockroachdb-skills) installed via `npx skills add`. `designing-application-transactions` was run against this codebase and found three real defects, listed below. | live |
 
 Status is stated per row on purpose. Anything marked "in progress" is not
 wired up yet, and this table is the single place to check what the artifact
 actually does versus what it is heading towards.
+
+### What the Agent Skills actually caught
+
+Running `designing-application-transactions` against this repo found three
+defects that were really there, not three suggestions:
+
+1. **Read-modify-write on version numbers.** `assert_claim` did
+   `SELECT max(version)` and then `INSERT version+1` as two statements. Two
+   ingesters racing on the same drug can both decide they are version N+1.
+   Fixed by computing the version inside the `INSERT ... SELECT` so the whole
+   decision happens in one statement.
+2. **`SELECT *` in `replay_decision`.** Replaced with explicit projections;
+   the table carries a 1024-dimension embedding that was being pulled over the
+   wire for no reason.
+3. **`LIMIT` without keyset pagination in the sweep.** A recall on a widely
+   dispensed drug implicates a large candidate set, and offset-style paging
+   re-scans and discards everything already processed on each page. Now paged
+   by `decision_id`, so the sweep starts correcting before it has finished
+   enumerating.
+
+The first one was a genuine correctness bug under concurrency. The contention
+test below exists because the skill prompted it.
 
 ## AWS services used
 
@@ -205,6 +227,8 @@ Verified on a live 9-node, 3-region cluster:
 | Sweep correctness | Standing answers built on superseded evidence found and reversed |
 | Exactly-once | Sweep replayed after completion; outbox still held exactly 1 notice |
 | Replay agreement | Bitemporal reconstruction and `AS OF SYSTEM TIME` returned identical read sets |
+| Concurrent writes | 128 writers across 128 claims: **176.9 memory writes/sec**, 0 failures |
+| Worst-case contention | 64 writers, 16 racing on each of 4 claims: 0 failures, version chains dense at exactly v1..v16, exactly 1 believed version per claim, 0 orphaned provenance rows |
 
 Idempotency matters more than it looks. openFDA refreshes weekly and most
 records are unchanged. An ingester that versioned on every pass would fire 331

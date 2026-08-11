@@ -194,7 +194,13 @@ def replay_decision(decision_id: str) -> dict[str, Any]:
     "what did the agent know, and when did it know it" view.
     """
     decision = query(
-        "SELECT * FROM decision WHERE decision_id = %s", (decision_id,)
+        """
+        SELECT decision_id, patient_id, question, answer, verdict, confidence,
+               model_id, decided_at, read_hlc, status
+          FROM decision
+         WHERE decision_id = %s
+        """,
+        (decision_id,),
     )
     if not decision:
         raise LookupError(f"no such decision: {decision_id}")

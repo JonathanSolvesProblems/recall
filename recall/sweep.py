@@ -66,28 +66,42 @@ CANDIDATE_SQL = """
      WHERE d.status = 'standing'
        AND dr.load_bearing
        AND stale_f.retracted_at IS NOT NULL
+       AND (%s::UUID IS NULL OR d.decision_id > %s::UUID)
        {extra}
      GROUP BY d.decision_id, d.question, d.answer, d.verdict, d.patient_id
+     ORDER BY d.decision_id
+     LIMIT %s
 """
 
+# Keyset pagination rather than OFFSET. A recall on a widely dispensed drug can
+# implicate a very large number of standing answers, and OFFSET makes the
+# database re-scan and discard everything already processed on every page, so
+# the sweep gets quadratically slower exactly when it matters most.
+BATCH = 500
 
-def find_candidates(*, subject_id: str | None = None, limit: int | None = None) -> list[Candidate]:
-    """Every standing answer that leaned on a claim which has since changed.
+
+def find_candidates(
+    *,
+    subject_id: str | None = None,
+    after: str | None = None,
+    batch: int = BATCH,
+) -> list[Candidate]:
+    """One page of standing answers that leaned on a claim which has since changed.
 
     Restricted to load-bearing reads. A decision that merely had a claim in its
     context window, without relying on it, is not invalidated when that claim
     moves, and treating it as invalidated is how a sweep turns into spam.
+
+    Ordered by decision_id so the caller can page through with ``after``.
     """
     extra = ""
-    params: list[Any] = []
+    params: list[Any] = [after, after]
     if subject_id:
         extra = "AND stale_f.subject_id = %s"
         params.append(subject_id)
+    params.append(batch)
 
     sql = CANDIDATE_SQL.format(extra=extra)
-    if limit:
-        sql += " LIMIT %s"
-        params.append(limit)
 
     return [
         Candidate(
@@ -240,27 +254,44 @@ def run_sweep(
     deterministically in tests and driven by Bedrock in production.
     """
     sweep_id = open_sweep(trigger_kind, trigger_ref)
-    candidates = find_candidates(subject_id=subject_id, limit=limit)
 
-    log.info("sweep %s: %d candidate decisions", sweep_id, len(candidates))
-
+    seen = 0
     reevaluated = 0
     reversed_ = 0
     notified = 0
+    after: str | None = None
 
-    for candidate in candidates:
-        verdict, answer = reevaluate(candidate)
-        reevaluated += 1
-        if verdict != candidate.verdict:
-            reversed_ += 1
-        if apply_correction(
-            sweep_id=sweep_id, candidate=candidate,
-            new_verdict=verdict, new_answer=answer,
-        ):
-            notified += 1
+    # Paged rather than loaded whole. The candidate set for a recall on a
+    # widely dispensed drug does not necessarily fit in memory, and holding it
+    # all before doing any work delays the first correction by the time it
+    # takes to enumerate the last one.
+    while True:
+        page = find_candidates(subject_id=subject_id, after=after)
+        if not page:
+            break
+
+        for candidate in page:
+            if limit is not None and seen >= limit:
+                break
+            seen += 1
+            verdict, answer = reevaluate(candidate)
+            reevaluated += 1
+            if verdict != candidate.verdict:
+                reversed_ += 1
+            if apply_correction(
+                sweep_id=sweep_id, candidate=candidate,
+                new_verdict=verdict, new_answer=answer,
+            ):
+                notified += 1
+
+        after = page[-1].decision_id
+        if limit is not None and seen >= limit:
+            break
+
+    log.info("sweep %s: %d candidate decisions", sweep_id, seen)
 
     summary = close_sweep(
-        sweep_id, candidates=len(candidates), reevaluated=reevaluated, reversed_=reversed_
+        sweep_id, candidates=seen, reevaluated=reevaluated, reversed_=reversed_
     )
     summary["notified"] = notified
     log.info("sweep %s complete: %s", sweep_id, summary)
