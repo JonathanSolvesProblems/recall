@@ -36,3 +36,10 @@ cockroach-data/
 # Agent Skills are installed via `npx skills add cockroachlabs/cockroachdb-skills`
 .agents/
 .claude/skills/
+
+# Credential exports. AWS access-key CSVs land in Downloads by default, but a
+# stray copy in the repo would otherwise be committable: *.pem and *.key were
+# ignored here, *.csv was not.
+*.csv
+accessKeys*.csv
+credentials
