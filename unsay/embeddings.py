@@ -13,10 +13,13 @@ import json
 import logging
 import math
 import os
+import random
 import struct
+import time
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from unsay.config import settings
 
@@ -37,8 +40,23 @@ def client():
     return _client
 
 
-def embed(text: str) -> list[float]:
-    """Embed one string. Returns a 1024-dimension unit vector."""
+THROTTLE_CODES = {
+    "ThrottlingException", "TooManyRequestsException",
+    "ServiceUnavailableException", "ModelTimeoutException",
+    "InternalServerException",
+}
+
+
+def embed(text: str, *, max_attempts: int = 6) -> list[float]:
+    """Embed one string. Returns a 1024-dimension unit vector.
+
+    Retries throttling explicitly rather than trusting botocore's adaptive
+    mode alone. Titan has no batch endpoint, so a bulk ingest is thousands of
+    sequential calls, and any other Bedrock work running at the same time
+    shares the same account quota. A long ingest dying two thirds of the way
+    through because something else was also talking to Bedrock is not a
+    failure worth propagating.
+    """
     cfg = settings()
 
     if os.environ.get("UNSAY_ALLOW_FAKE_EMBEDDINGS") == "1":
@@ -47,7 +65,21 @@ def embed(text: str) -> list[float]:
     body = json.dumps(
         {"inputText": text, "dimensions": cfg.bedrock_embed_dim, "normalize": True}
     )
-    resp = client().invoke_model(modelId=cfg.bedrock_embed_model_id, body=body)
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = client().invoke_model(modelId=cfg.bedrock_embed_model_id, body=body)
+            break
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code not in THROTTLE_CODES or attempt == max_attempts:
+                raise
+            delay = min(0.5 * (2 ** (attempt - 1)), 20.0)
+            delay += random.uniform(0, delay)
+            log.warning("embed: %s on attempt %d/%d, retrying in %.1fs",
+                        code, attempt, max_attempts, delay)
+            time.sleep(delay)
+
     vec = json.loads(resp["body"].read())["embedding"]
 
     if len(vec) != cfg.bedrock_embed_dim:
