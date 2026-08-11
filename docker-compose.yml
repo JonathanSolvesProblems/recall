@@ -1,0 +1,109 @@
+# Recall: 9-node CockroachDB cluster across 3 simulated AWS regions.
+#
+# Three nodes per region lets the `recall` database take the
+# SURVIVE REGION FAILURE goal (5 replicas, no single region holding a
+# majority), which is what the live region-kill demo depends on.
+#
+# Runs locally for development and unchanged on a single EC2 instance.
+# Budget roughly 6 GB of RAM for the full cluster.
+#
+#   docker compose up -d
+#   docker compose --profile init run --rm init
+#
+# Kill a region during the demo:
+#   docker compose stop crdb-euw1-1 crdb-euw1-2 crdb-euw1-3
+
+x-crdb: &crdb
+  image: cockroachdb/cockroach:${CRDB_VERSION:-v26.2.5}
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "cockroach", "sql", "--insecure", "-e", "SELECT 1"]
+    interval: 10s
+    timeout: 5s
+    retries: 12
+    start_period: 20s
+
+# Each node carries fixed --cache/--max-sql-memory budgets. Nine nodes on one
+# host would each otherwise claim a percentage of total system memory and
+# oversubscribe it.
+
+services:
+  # ---------------------------------------------------------------- us-east-1
+  crdb-use1-1:
+    <<: *crdb
+    hostname: crdb-use1-1
+    command: start --advertise-addr=crdb-use1-1:26257 --locality=region=us-east-1,zone=us-east-1a --insecure --http-addr=0.0.0.0:8080 --cache=128MiB --max-sql-memory=256MiB --join=crdb-use1-1:26257,crdb-usw2-1:26257,crdb-euw1-1:26257
+    volumes: ["use1-1:/cockroach/cockroach-data"]
+    ports: ["26257:26257", "8080:8080"]
+
+  crdb-use1-2:
+    <<: *crdb
+    hostname: crdb-use1-2
+    command: start --advertise-addr=crdb-use1-2:26257 --locality=region=us-east-1,zone=us-east-1b --insecure --http-addr=0.0.0.0:8080 --cache=128MiB --max-sql-memory=256MiB --join=crdb-use1-1:26257,crdb-usw2-1:26257,crdb-euw1-1:26257
+    volumes: ["use1-2:/cockroach/cockroach-data"]
+
+  crdb-use1-3:
+    <<: *crdb
+    hostname: crdb-use1-3
+    command: start --advertise-addr=crdb-use1-3:26257 --locality=region=us-east-1,zone=us-east-1c --insecure --http-addr=0.0.0.0:8080 --cache=128MiB --max-sql-memory=256MiB --join=crdb-use1-1:26257,crdb-usw2-1:26257,crdb-euw1-1:26257
+    volumes: ["use1-3:/cockroach/cockroach-data"]
+
+  # ---------------------------------------------------------------- us-west-2
+  crdb-usw2-1:
+    <<: *crdb
+    hostname: crdb-usw2-1
+    command: start --advertise-addr=crdb-usw2-1:26257 --locality=region=us-west-2,zone=us-west-2a --insecure --http-addr=0.0.0.0:8080 --cache=128MiB --max-sql-memory=256MiB --join=crdb-use1-1:26257,crdb-usw2-1:26257,crdb-euw1-1:26257
+    volumes: ["usw2-1:/cockroach/cockroach-data"]
+    ports: ["26258:26257", "8081:8080"]
+
+  crdb-usw2-2:
+    <<: *crdb
+    hostname: crdb-usw2-2
+    command: start --advertise-addr=crdb-usw2-2:26257 --locality=region=us-west-2,zone=us-west-2b --insecure --http-addr=0.0.0.0:8080 --cache=128MiB --max-sql-memory=256MiB --join=crdb-use1-1:26257,crdb-usw2-1:26257,crdb-euw1-1:26257
+    volumes: ["usw2-2:/cockroach/cockroach-data"]
+
+  crdb-usw2-3:
+    <<: *crdb
+    hostname: crdb-usw2-3
+    command: start --advertise-addr=crdb-usw2-3:26257 --locality=region=us-west-2,zone=us-west-2c --insecure --http-addr=0.0.0.0:8080 --cache=128MiB --max-sql-memory=256MiB --join=crdb-use1-1:26257,crdb-usw2-1:26257,crdb-euw1-1:26257
+    volumes: ["usw2-3:/cockroach/cockroach-data"]
+
+  # ---------------------------------------------------------------- eu-west-1
+  crdb-euw1-1:
+    <<: *crdb
+    hostname: crdb-euw1-1
+    command: start --advertise-addr=crdb-euw1-1:26257 --locality=region=eu-west-1,zone=eu-west-1a --insecure --http-addr=0.0.0.0:8080 --cache=128MiB --max-sql-memory=256MiB --join=crdb-use1-1:26257,crdb-usw2-1:26257,crdb-euw1-1:26257
+    volumes: ["euw1-1:/cockroach/cockroach-data"]
+    ports: ["26259:26257", "8082:8080"]
+
+  crdb-euw1-2:
+    <<: *crdb
+    hostname: crdb-euw1-2
+    command: start --advertise-addr=crdb-euw1-2:26257 --locality=region=eu-west-1,zone=eu-west-1b --insecure --http-addr=0.0.0.0:8080 --cache=128MiB --max-sql-memory=256MiB --join=crdb-use1-1:26257,crdb-usw2-1:26257,crdb-euw1-1:26257
+    volumes: ["euw1-2:/cockroach/cockroach-data"]
+
+  crdb-euw1-3:
+    <<: *crdb
+    hostname: crdb-euw1-3
+    command: start --advertise-addr=crdb-euw1-3:26257 --locality=region=eu-west-1,zone=eu-west-1c --insecure --http-addr=0.0.0.0:8080 --cache=128MiB --max-sql-memory=256MiB --join=crdb-use1-1:26257,crdb-usw2-1:26257,crdb-euw1-1:26257
+    volumes: ["euw1-3:/cockroach/cockroach-data"]
+
+  # ------------------------------------------------------------------ one-shot
+  init:
+    image: cockroachdb/cockroach:${CRDB_VERSION:-v26.2.5}
+    profiles: ["init"]
+    command: init --insecure --host=crdb-use1-1:26257
+    depends_on:
+      crdb-use1-1:
+        condition: service_started
+
+volumes:
+  use1-1: {}
+  use1-2: {}
+  use1-3: {}
+  usw2-1: {}
+  usw2-2: {}
+  usw2-3: {}
+  euw1-1: {}
+  euw1-2: {}
+  euw1-3: {}
