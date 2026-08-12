@@ -5,206 +5,253 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Unsay — agent memory that takes it back</title>
 <style>
+  /* The visual language is a regulatory correction notice, not a dashboard:
+     paper ground, document rules, monospace for anything that identifies a
+     record, and colour reserved entirely for severity. Nothing is decorative,
+     because on a safety tool a coloured thing that means nothing teaches the
+     reader to ignore the coloured things that do. */
   :root{
-    --ink:#12141a; --paper:#f7f6f3; --line:#dcd8d0; --muted:#6b6862;
-    --stop:#a8200d; --caution:#8a5a00; --safe:#1f6b3a; --accent:#2d3ff5;
-    --card:#fff;
+    --ink:#171512; --paper:#faf8f4; --card:#fff; --rule:#e2ddd3; --muted:#6f6a61;
+    --stop:#9d1c09; --stop-bg:#fdeceb; --caution:#8a5300; --caution-bg:#fdf4e3;
+    --safe:#1c5f36; --safe-bg:#e9f4ec; --link:#1b4ed8;
   }
   *{box-sizing:border-box}
-  body{margin:0;font:15px/1.55 ui-sans-serif,-apple-system,Segoe UI,Inter,sans-serif;
-       background:var(--paper);color:var(--ink)}
-  header{border-bottom:1px solid var(--line);padding:18px 24px;display:flex;
-         align-items:baseline;gap:14px;flex-wrap:wrap;background:var(--card)}
-  h1{font-size:19px;margin:0;letter-spacing:-.02em}
-  .tag{color:var(--muted);font-size:13px}
-  main{max-width:1180px;margin:0 auto;padding:22px 24px 60px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-  @media(max-width:900px){.grid{grid-template-columns:1fr}}
-  section{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:18px;margin-bottom:20px}
-  h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);
-     margin:0 0 14px;font-weight:600}
-  input,button,select{font:inherit}
-  input,select{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:6px;background:#fff}
-  button{padding:9px 15px;border:1px solid var(--ink);background:var(--ink);color:#fff;
-         border-radius:6px;cursor:pointer;font-weight:500}
+  body{margin:0;background:var(--paper);color:var(--ink);
+       font:15.5px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Inter,sans-serif}
+  code,.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.86em}
+
+  header{background:var(--card);border-bottom:1px solid var(--rule);padding:16px 26px}
+  .hwrap{max-width:1120px;margin:0 auto;display:flex;align-items:baseline;gap:13px;flex-wrap:wrap}
+  h1{margin:0;font-size:20px;letter-spacing:-.025em}
+  .tag{color:var(--muted);font-size:13.5px}
+  .pills{margin-left:auto;display:flex;gap:5px;flex-wrap:wrap}
+  .pill{font-size:11px;padding:2px 8px;border-radius:3px;background:#f0ede7;
+        color:var(--muted);border:1px solid var(--rule)}
+  .pill.ok{background:var(--safe-bg);color:var(--safe);border-color:#c9e2d2}
+  .pill.bad{background:var(--stop-bg);color:var(--stop);border-color:#f0cdc8}
+
+  main{max-width:1120px;margin:0 auto;padding:24px 26px 70px}
+  .step{background:var(--card);border:1px solid var(--rule);border-radius:6px;
+        padding:18px 20px;margin-bottom:18px;position:relative}
+  .step > h2{margin:0 0 4px;font-size:15px;letter-spacing:-.01em;
+             display:flex;align-items:center;gap:9px}
+  .n{display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+     border-radius:50%;background:var(--ink);color:#fff;font-size:11.5px;font-weight:700;flex:none}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 14px 30px}
+  .body{margin-left:30px}
+  @media(max-width:720px){.sub,.body{margin-left:0}}
+
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input,select{padding:8px 10px;border:1px solid var(--rule);border-radius:4px;
+               background:#fff;font:inherit;min-width:0}
+  button{padding:8px 15px;border-radius:4px;border:1px solid var(--ink);
+         background:var(--ink);color:#fff;font:inherit;font-weight:500;cursor:pointer}
   button.ghost{background:#fff;color:var(--ink)}
-  button:disabled{opacity:.45;cursor:not-allowed}
-  .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
-  .verdict{display:inline-block;padding:3px 11px;border-radius:99px;font-weight:700;
-           font-size:12px;letter-spacing:.06em}
-  .v-stop{background:#fdecea;color:var(--stop)} .v-caution{background:#fdf3e0;color:var(--caution)}
-  .v-safe{background:#e8f5ec;color:var(--safe)} .v-unknown{background:#eee;color:var(--muted)}
-  .claim{border-left:3px solid var(--line);padding:7px 0 7px 11px;margin:8px 0;font-size:13.5px}
-  .claim.bear{border-left-color:var(--accent)}
-  .meta{color:var(--muted);font-size:12px}
-  .pill{display:inline-block;padding:2px 8px;border-radius:99px;background:#eee;
-        font-size:11px;color:var(--muted);margin-right:5px}
-  .pill.up{background:#e8f5ec;color:var(--safe)} .pill.down{background:#fdecea;color:var(--stop)}
-  .correction{border:1px solid var(--line);border-left:3px solid var(--stop);
-              border-radius:6px;padding:11px 13px;margin:9px 0;background:#fffdfc}
-  .who{font-weight:650}
-  .arrow{color:var(--muted);font-size:12px;margin:3px 0}
-  pre{background:#14161c;color:#dfe3ea;padding:13px;border-radius:7px;overflow-x:auto;
-      font-size:12px;line-height:1.5}
+  button:disabled{opacity:.4;cursor:not-allowed}
+
+  .verdict{display:inline-block;padding:3px 10px;border-radius:3px;
+           font-size:11.5px;font-weight:800;letter-spacing:.08em}
+  .v-stop{background:var(--stop-bg);color:var(--stop)}
+  .v-caution{background:var(--caution-bg);color:var(--caution)}
+  .v-safe{background:var(--safe-bg);color:var(--safe)}
+  .v-unknown{background:#efece6;color:var(--muted)}
+
+  .claim{border-left:2px solid var(--rule);padding:6px 0 6px 12px;margin:9px 0;font-size:13.5px}
+  .claim.bear{border-left-color:var(--ink)}
+  .key{color:var(--muted)}
+  .muted{color:var(--muted);font-size:12.5px}
   .empty{color:var(--muted);font-size:13.5px;font-style:italic}
-  .spin{display:inline-block;width:11px;height:11px;border:2px solid var(--line);
-        border-top-color:var(--ink);border-radius:50%;animation:s .7s linear infinite}
+
+  /* The correction notice is the emotional peak, so it is the only element
+     given weight: a name, then what changed, then why. */
+  .notice{border:1px solid var(--rule);border-left:4px solid var(--stop);
+          border-radius:5px;padding:13px 15px;margin:10px 0;background:#fffcfb}
+  .notice .who{font-weight:700;font-size:16px;letter-spacing:-.01em}
+  .notice .to{color:var(--muted);font-size:12px}
+  .flip{margin:7px 0;font-size:13px;display:flex;align-items:center;gap:8px}
+  .was{text-decoration:line-through;opacity:.55}
+  .count{font-size:40px;font-weight:800;letter-spacing:-.03em;line-height:1.05}
+  .countsub{color:var(--muted);font-size:13px;margin-top:2px}
+  .spin{display:inline-block;width:11px;height:11px;border:2px solid var(--rule);
+        border-top-color:var(--ink);border-radius:50%;animation:s .7s linear infinite;
+        vertical-align:-1px}
   @keyframes s{to{transform:rotate(360deg)}}
-  .big{font-size:27px;font-weight:700;letter-spacing:-.02em}
+  .ver{display:inline-flex;gap:6px;align-items:center;font-size:12px}
+  .ver .old{text-decoration:line-through;opacity:.5}
 </style>
 </head>
 <body>
 <header>
-  <h1>Unsay</h1>
-  <span class="tag">agent memory that goes back and un-says what it told you</span>
-  <span style="flex:1"></span>
-  <span id="regions" class="meta"></span>
+  <div class="hwrap">
+    <h1>Unsay</h1>
+    <span class="tag">agent memory that goes back and un-says what it told you</span>
+    <span class="pills" id="pills"></span>
+  </div>
 </header>
 
 <main>
-  <!-- 1. the ordinary thing -->
-  <section>
-    <h2>Ask the pharmacy agent</h2>
-    <div class="row">
-      <div style="flex:2;min-width:260px">
-        <input id="q" placeholder="Is my cefazolin injection safe to use?"
-               value="Is my cefazolin injection safe to use?">
+  <section class="step">
+    <h2><span class="n">1</span> A patient asks</h2>
+    <p class="sub">Answered from live openFDA recall data. Every claim the agent
+      reads is recorded with the exact version it read.</p>
+    <div class="body">
+      <div class="row">
+        <input id="q" style="flex:3;min-width:280px"
+               value="My amlodipine and benazepril is from lot GB01616. Is it safe to keep taking?">
+        <input id="subject" style="flex:1;min-width:170px"
+               value="amlodipine-besylate-and-benazepril-hydrochloride">
+        <select id="patient" style="flex:1;min-width:150px"></select>
+        <button id="askBtn">Ask</button>
       </div>
-      <div style="flex:1;min-width:150px">
-        <input id="subject" placeholder="drug (optional)" value="cefazolin">
-      </div>
-      <div style="flex:1;min-width:150px"><select id="patient"></select></div>
-      <button id="askBtn">Ask</button>
+      <div id="answer" style="margin-top:14px"></div>
     </div>
-    <div id="answer" style="margin-top:15px"></div>
   </section>
 
-  <div class="grid">
-    <!-- 2. the world moves -->
-    <section>
-      <h2>The world changes</h2>
-      <p class="meta" style="margin-top:0">
-        Publish a Class I recall through the same ingest path openFDA uses. The
-        current claim is retracted and a new version asserted, in one transaction.
-      </p>
+  <section class="step">
+    <h2><span class="n">2</span> The world changes</h2>
+    <p class="sub">The FDA escalates that lot to Class I. The claim on file is
+      retracted and a new version asserted under the same key, in one
+      transaction. Nothing already read is mutated.</p>
+    <div class="body">
       <div class="row">
-        <div style="flex:1;min-width:150px">
-          <input id="sSubject" placeholder="drug" value="cefazolin">
-        </div>
-        <div style="flex:1;min-width:120px">
-          <input id="sLot" placeholder="lot (optional)" value="PG4360">
-        </div>
-        <button id="supBtn" class="ghost">Publish recall</button>
+        <input id="sSubject" style="flex:2;min-width:230px"
+               value="amlodipine-besylate-and-benazepril-hydrochloride">
+        <input id="sLot" style="flex:1;min-width:120px" value="GB01616">
+        <button id="supBtn" class="ghost">Publish Class I recall</button>
       </div>
       <div id="supOut" style="margin-top:12px"></div>
-    </section>
+    </div>
+  </section>
 
-    <!-- 3. the flagship -->
-    <section>
-      <h2>Retroactive repair</h2>
-      <p class="meta" style="margin-top:0">
-        Every standing answer that leaned on a claim version we no longer
-        believe. A vector store cannot ask this question.
-      </p>
+  <section class="step">
+    <h2><span class="n">3</span> Retroactive repair</h2>
+    <p class="sub">Every answer still standing that leaned on a claim version we
+      no longer believe. This is a join across decision → provenance → claim.
+      A vector store cannot ask it: it has no record of which version an answer
+      consumed.</p>
+    <div class="body">
       <div class="row">
         <button id="candBtn" class="ghost">Find affected answers</button>
         <button id="sweepBtn">Run sweep</button>
       </div>
-      <div id="sweepOut" style="margin-top:12px"></div>
-    </section>
-  </div>
+      <div id="sweepOut" style="margin-top:13px"></div>
+    </div>
+  </section>
 
-  <!-- 4. who got told -->
-  <section>
-    <h2>Corrections sent to people</h2>
-    <div id="outbox"><span class="empty">Nothing corrected yet.</span></div>
+  <section class="step">
+    <h2><span class="n">4</span> Corrections, by name</h2>
+    <p class="sub">Each written in the same transaction as the correction that
+      justifies it, keyed so a replayed sweep cannot send a second time.</p>
+    <div class="body"><div id="outbox"><span class="empty">Nothing corrected yet. Run steps 1 to 3.</span></div></div>
   </section>
 </main>
 
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const j = async (u, o) => (await fetch(u, o)).json();
+const j = async (u, o) => { const r = await fetch(u, o); if(!r.ok) throw new Error(await r.text()); return r.json(); };
+const vpill = v => `<span class="verdict v-${esc(v)}">${esc(v).toUpperCase()}</span>`;
 
 async function status(){
   try{
     const s = await j("/api/status");
-    $("#regions").innerHTML = s.regions.map(r => {
-      const cls = r.up ? (r.probed ? 'up' : '') : 'down';
-      const word = r.up ? (r.probed ? 'up' : 'serving') : 'DOWN';
-      return `<span class="pill ${cls}">${esc(r.region)}${r.primary?' ·primary':''} ${word}</span>`;
-    }).join("") + `<span class="pill">survive: ${esc(s.survival_goal)}</span>`
+    $("#pills").innerHTML =
+      s.regions.map(r => {
+        const cls = r.up ? (r.probed ? "ok" : "") : "bad";
+        const w = r.up ? (r.probed ? "up" : "serving") : "DOWN";
+        return `<span class="pill ${cls}">${esc(r.region)} ${w}</span>`;
+      }).join("")
+      + `<span class="pill">survive ${esc(s.survival_goal)}</span>`
       + `<span class="pill">${s.counts.believed} claims</span>`
-      + `<span class="pill">${s.counts.standing} standing answers</span>`;
-  }catch(e){ $("#regions").textContent = "cluster unreachable"; }
+      + `<span class="pill">${s.counts.standing} standing</span>`;
+  }catch(e){ $("#pills").innerHTML = `<span class="pill bad">cluster unreachable</span>`; }
 }
 
 async function loadPatients(){
-  const ps = await j("/api/patients");
-  $("#patient").innerHTML = `<option value="">no patient</option>` +
-    ps.map(p => `<option value="${esc(p.patient_id)}">${esc(p.display_name)}</option>`).join("");
+  try{
+    const ps = await j("/api/patients");
+    $("#patient").innerHTML = `<option value="">no patient</option>` +
+      ps.map(p => `<option value="${esc(p.patient_id)}">${esc(p.display_name)}</option>`).join("");
+  }catch(e){}
 }
 
 $("#askBtn").onclick = async () => {
-  const btn = $("#askBtn"); btn.disabled = true;
-  $("#answer").innerHTML = `<span class="spin"></span> <span class="meta">thinking…</span>`;
+  const b = $("#askBtn"); b.disabled = true;
+  $("#answer").innerHTML = `<span class="spin"></span> <span class="muted">reading memory…</span>`;
   try{
     const r = await j("/api/ask", {method:"POST", headers:{"content-type":"application/json"},
       body: JSON.stringify({question:$("#q").value, subject:$("#subject").value, patient_id:$("#patient").value})});
-    $("#answer").innerHTML = `
-      <div><span class="verdict v-${esc(r.verdict)}">${esc(r.verdict).toUpperCase()}</span>
-        <span class="meta">confidence ${r.confidence.toFixed(2)}</span></div>
-      <p style="margin:11px 0 6px">${esc(r.answer)}</p>
-      <div class="meta">evidence it read (blue = load-bearing):</div>
-      ${r.evidence.map(e => `<div class="claim ${e.load_bearing?'bear':''}">
-          <span class="meta">${esc(e.fact_key)} v${e.fact_version} · ${esc(e.severity)}</span><br>${esc(e.claim)}
-        </div>`).join("") || '<div class="empty">no claims retrieved</div>'}`;
-  }catch(e){ $("#answer").innerHTML = `<span class="empty">failed: ${esc(e)}</span>`; }
-  btn.disabled = false; status();
+    $("#answer").innerHTML =
+      `<div>${vpill(r.verdict)} <span class="muted">confidence ${r.confidence.toFixed(2)}</span></div>
+       <p style="margin:10px 0 8px">${esc(r.answer)}</p>
+       <div class="muted">evidence read (bold rule = load-bearing):</div>
+       ${r.evidence.map(e => `<div class="claim ${e.load_bearing?'bear':''}">
+         <span class="key mono">${esc(e.fact_key)} v${e.fact_version}</span>
+         <span class="muted"> · ${esc(e.severity)}</span><br>${esc(e.claim)}</div>`).join("")
+        || `<div class="empty">no claims retrieved</div>`}`;
+  }catch(e){ $("#answer").innerHTML = `<span class="empty">failed: ${esc(e.message||e)}</span>`; }
+  b.disabled = false; status();
 };
 
 $("#supBtn").onclick = async () => {
   const b = $("#supBtn"); b.disabled = true;
-  const r = await j("/api/demo/supersede", {method:"POST", headers:{"content-type":"application/json"},
-    body: JSON.stringify({subject:$("#sSubject").value, lot:$("#sLot").value})});
-  $("#supOut").innerHTML = r.changed
-    ? `<div class="claim bear"><span class="meta">${esc(r.fact_key)} → v${r.version}, prior version retracted</span><br>${esc(r.claim)}</div>`
-    : `<span class="empty">identical to what is already believed; no new version.</span>`;
+  try{
+    const r = await j("/api/demo/supersede", {method:"POST", headers:{"content-type":"application/json"},
+      body: JSON.stringify({subject:$("#sSubject").value, lot:$("#sLot").value})});
+    $("#supOut").innerHTML = r.changed
+      ? `<div class="claim bear">
+           <div class="ver"><span class="key mono">${esc(r.fact_key)}</span>
+             <span class="old">v${r.version-1}</span> → <strong>v${r.version}</strong>
+             <span class="muted">prior version retracted</span></div>
+           <div style="margin-top:5px">${esc(r.claim)}</div></div>`
+      : `<span class="empty">identical to what is already believed; no new version written.</span>`;
+  }catch(e){ $("#supOut").innerHTML = `<span class="empty">${esc(e.message||e)}</span>`; }
   b.disabled = false; status();
 };
 
 $("#candBtn").onclick = async () => {
+  $("#sweepOut").innerHTML = `<span class="spin"></span>`;
   const c = await j("/api/sweep/candidates");
   $("#sweepOut").innerHTML = c.length
-    ? `<div class="big">${c.length}</div><div class="meta">standing answer(s) built on evidence that has since changed</div>`
-      + c.map(x => `<div class="claim"><span class="verdict v-${esc(x.verdict)}">${esc(x.verdict).toUpperCase()}</span>
-          ${esc(x.question)}<br><span class="meta">${esc((x.stale||[]).map(s=>s.fact_key+" v"+s.read_version).join(", "))}</span></div>`).join("")
+    ? `<div class="count">${c.length}</div>
+       <div class="countsub">standing answer${c.length===1?'':'s'} built on evidence that has since changed</div>
+       ${c.slice(0,12).map(x => `<div class="claim">${vpill(x.verdict)} ${esc(x.question)}<br>
+         <span class="key mono">${esc((x.stale||[]).map(s=>s.fact_key+" v"+s.read_version).join(", "))}</span></div>`).join("")}`
     : `<span class="empty">Nothing affected. Every standing answer rests on current evidence.</span>`;
 };
 
 $("#sweepBtn").onclick = async () => {
   const b = $("#sweepBtn"); b.disabled = true;
-  $("#sweepOut").innerHTML = `<span class="spin"></span> <span class="meta">re-deciding each affected answer…</span>`;
-  const s = await j("/api/sweep/run", {method:"POST"});
-  $("#sweepOut").innerHTML = `
-    <div class="big">${s.reversed} reversed</div>
-    <div class="meta">${s.candidates} examined · ${s.notified} people notified · ${Number(s.seconds).toFixed(2)}s</div>`;
-  await loadOutbox(); status(); b.disabled = false;
+  $("#sweepOut").innerHTML = `<span class="spin"></span> <span class="muted">re-deciding each affected answer against current memory…</span>`;
+  try{
+    const s = await j("/api/sweep/run", {method:"POST"});
+    $("#sweepOut").innerHTML =
+      `<div class="count">${s.reversed}</div>
+       <div class="countsub">answer${s.reversed===1?'':'s'} reversed · ${s.candidates} examined ·
+         ${s.notified} notified · ${Number(s.seconds).toFixed(1)}s</div>`;
+    await loadOutbox();
+    document.querySelector("#outbox").scrollIntoView({behavior:"smooth", block:"center"});
+  }catch(e){ $("#sweepOut").innerHTML = `<span class="empty">${esc(e.message||e)}</span>`; }
+  b.disabled = false; status();
 };
 
 async function loadOutbox(){
-  const o = await j("/api/outbox");
-  $("#outbox").innerHTML = o.length ? o.map(x => `
-    <div class="correction">
-      <div class="who">${esc(x.payload.name || x.recipient)}</div>
-      <div class="arrow">${esc(x.payload.prior_verdict)} → <strong>${esc(x.payload.new_verdict)}</strong></div>
-      <div>${esc(x.payload.message)}</div>
-      <div class="meta" style="margin-top:6px">once-only key ${esc(String(x.dedupe_key).slice(0,20))}…</div>
-    </div>`).join("") : `<span class="empty">Nothing corrected yet.</span>`;
+  try{
+    const o = await j("/api/outbox");
+    $("#outbox").innerHTML = o.length ? o.map(x => `
+      <div class="notice">
+        <div class="who">${esc(x.payload.name || x.recipient)}</div>
+        <div class="to mono">${esc(x.recipient)}</div>
+        <div class="flip">${vpill(x.payload.prior_verdict)}<span class="was"></span>→ ${vpill(x.payload.new_verdict)}</div>
+        <div>${esc(x.payload.message)}</div>
+        <div class="muted" style="margin-top:6px">once-only key <span class="mono">${esc(String(x.dedupe_key).slice(0,24))}…</span></div>
+      </div>`).join("")
+      : `<span class="empty">Nothing corrected yet. Run steps 1 to 3.</span>`;
+  }catch(e){}
 }
 
 status(); loadPatients(); loadOutbox();
-setInterval(status, 5000);
+setInterval(status, 8000);
 </script>
 </body>
 </html>

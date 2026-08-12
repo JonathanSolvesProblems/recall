@@ -18,10 +18,11 @@ Everything else is supporting and gets cut before that gets cut.
 **Screen:** the Unsay web UI. A patient question typed in plain language.
 
 > "Margaret asks the pharmacy whether her blood-pressure tablets are still
-> safe to take. The agent checks, and says yes."
+> safe to take. The agent checks. There was a recall on her lot, but it closed
+> in July, so it tells her to keep taking them and why."
 
-Answer appears: **SAFE**, with the FDA claim it relied on shown underneath,
-lot number visible.
+Answer appears: **CAUTION**, with the FDA claim it relied on shown underneath,
+lot GB01616 visible.
 
 *Nothing remarkable has happened yet. That is the point.*
 
@@ -34,7 +35,7 @@ lot number visible.
 **Screen:** the claim versioning in real time. v1 retracted, v2 asserted.
 
 > "The answer Margaret got was correct when she got it. It is wrong now, and
-> nothing about it changed."
+> nothing about the answer changed. The world moved underneath it."
 
 ### 0:22 - 0:52 | The one feature
 **Screen:** the sweep firing. Counter climbing.
@@ -50,11 +51,13 @@ over it.
 
 **Screen:** the corrections list populating with names.
 
-> "Forty-one people were told this was safe. Here they are. Each one
-> re-decided against what the FDA knows today, each one a correction drafted
-> for a pharmacist to sign off."
+> "Twelve people were told to keep taking it. Here they are, by name. Each
+> one re-decided against what the FDA knows today, each one a correction
+> drafted for a pharmacist to sign off."
 
-*This is the peak. Hold on the named list, not on the counter.*
+*This is the peak. Hold on the named list, not on the counter. The real run
+takes about 45 seconds for twelve; cut or speed-ramp the middle, but let the
+names land one by one at the start and end.*
 
 ### 0:52 - 1:12 | It does not stop
 **Screen:** terminal, `docker compose stop crdb-euw1-*`, mid-sweep.
