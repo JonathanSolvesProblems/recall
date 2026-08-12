@@ -62,9 +62,18 @@ fi
 if ! aws lambda get-function-url-config --function-name "$FN" --region "$REGION" >/dev/null 2>&1; then
   aws lambda create-function-url-config --function-name "$FN" --region "$REGION" \
     --auth-type NONE >/dev/null
+  # Function URLs created after October 2025 need BOTH permissions even with
+  # AuthType NONE: InvokeFunctionUrl carrying the auth-type condition, and
+  # InvokeFunction without it, because that condition is rejected on
+  # InvokeFunction. Granting only the first, which is what every pre-October
+  # guide still shows, yields a 403 AccessDeniedException against a policy
+  # that reads as entirely correct.
   aws lambda add-permission --function-name "$FN" --region "$REGION" \
     --statement-id public-url --action lambda:InvokeFunctionUrl \
     --principal '*' --function-url-auth-type NONE >/dev/null
+  aws lambda add-permission --function-name "$FN" --region "$REGION" \
+    --statement-id public-url-invoke --action lambda:InvokeFunction \
+    --principal '*' >/dev/null
 fi
 
 URL=$(aws lambda get-function-url-config --function-name "$FN" --region "$REGION" \

@@ -56,19 +56,31 @@ class SupersedeRequest(BaseModel):
 
 @app.get("/api/status")
 def status() -> dict[str, Any]:
+    # The probe map only covers the local 9-node cluster, where each region has
+    # a directly reachable port so the demo can show one going away. A hosted
+    # single-region cluster has no such port, and treating "no probe configured"
+    # as "down" made the deployed demo report its own healthy region as failed.
+    #
+    # Absence of a probe is absence of evidence: the region is reported as up,
+    # because this query reached the cluster in order to ask the question at
+    # all, and marked unprobed so the UI does not overclaim.
     regions = []
     for r in query("SHOW REGIONS FROM DATABASE unsay"):
         name = r["region"]
-        up = False
         dsn = REGION_PROBES.get(name)
-        if dsn:
+        if dsn is None:
+            up, probed = True, False
+        else:
+            probed = True
             try:
                 with psycopg.connect(dsn) as c:
                     c.execute("SELECT 1")
                 up = True
             except Exception:
                 up = False
-        regions.append({"region": name, "primary": bool(r.get("primary")), "up": up})
+        regions.append(
+            {"region": name, "primary": bool(r.get("primary")), "up": up, "probed": probed}
+        )
 
     counts = query(
         """

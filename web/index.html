@@ -129,9 +129,11 @@ const j = async (u, o) => (await fetch(u, o)).json();
 async function status(){
   try{
     const s = await j("/api/status");
-    $("#regions").innerHTML = s.regions.map(r =>
-      `<span class="pill ${r.up?'up':'down'}">${esc(r.region)}${r.primary?' ·primary':''} ${r.up?'up':'DOWN'}</span>`
-    ).join("") + `<span class="pill">survive: ${esc(s.survival_goal)}</span>`
+    $("#regions").innerHTML = s.regions.map(r => {
+      const cls = r.up ? (r.probed ? 'up' : '') : 'down';
+      const word = r.up ? (r.probed ? 'up' : 'serving') : 'DOWN';
+      return `<span class="pill ${cls}">${esc(r.region)}${r.primary?' ·primary':''} ${word}</span>`;
+    }).join("") + `<span class="pill">survive: ${esc(s.survival_goal)}</span>`
       + `<span class="pill">${s.counts.believed} claims</span>`
       + `<span class="pill">${s.counts.standing} standing answers</span>`;
   }catch(e){ $("#regions").textContent = "cluster unreachable"; }

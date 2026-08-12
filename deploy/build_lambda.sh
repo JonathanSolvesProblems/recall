@@ -21,10 +21,15 @@ python -m pip install \
   --python-version 3.12 \
   --only-binary=:all: \
   "psycopg[binary,pool]>=3.2" "fastapi>=0.115" "pydantic>=2.9" \
-  "pydantic-settings>=2.6" mangum boto3
+  "pydantic-settings>=2.6" "httpx>=0.27" mangum boto3
 
 # The application itself, minus anything the request path never touches.
 cp -r unsay "$BUILD/unsay"
+
+# The CockroachDB Cloud CA. sslmode=verify-full needs a root cert, and libpq
+# looks in ~/.postgresql/root.crt by default, which does not exist on Lambda.
+# Bundled here and pointed at explicitly via sslrootcert in the DSN.
+curl -sS --max-time 60 -o "$BUILD/root.crt"   "https://cockroachlabs.cloud/clusters/${CRDB_CLUSTER_ID:-8f000271-5a82-40bc-83fa-f8f17ce742f3}/cert"
 mkdir -p "$BUILD/web" && cp web/index.html "$BUILD/web/"
 find "$BUILD" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 find "$BUILD" -name "*.dist-info" -type d -prune -exec rm -rf {} + 2>/dev/null || true
