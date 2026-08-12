@@ -2,6 +2,11 @@
 
 **An AI medication-safety agent that goes back and un-says what it told you.**
 
+**[Live demo](https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/)**
+· [health](https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/api/health)
+· AWS Lambda in front of a CockroachDB Cloud cluster holding 554 live openFDA
+claims. First request after a quiet spell pays a cold start of a few seconds.
+
 Ask it whether your prescription is safe and it answers from live FDA data.
 The part that matters comes later: when the FDA recalls that drug next
 Tuesday, Unsay finds every person it already reassured, works out which of
@@ -181,12 +186,22 @@ The hackathon requires two.
 |---|---|---|
 | **Distributed Vector Indexing** | `CREATE VECTOR INDEX fact_semantic ON fact (believed, embedding vector_cosine_ops)`. The `believed` prefix column is the point: without it a top-K search spends part of its budget on retracted claims that get filtered afterwards, so a query asking for 8 results quietly returns 3. Prefixing means all K neighbours come from claims currently held true. | live |
 | **Agent Skills** | All 34 skills from [cockroachlabs/cockroachdb-skills](https://github.com/cockroachlabs/cockroachdb-skills) installed via `npx skills add`. `designing-application-transactions` was run against this codebase and found three real defects, listed below. | live |
-| **Managed MCP Server** | Read-only schema introspection through `https://cockroachlabs.cloud/mcp` before the agent generates SQL, which is Cockroach Labs' own stated fix for schema hallucination. | **in progress** |
-| **ccloud CLI** | Provisions the Cloud cluster, configures networking, pulls audit logs. | **in progress** |
+| **Managed MCP Server** | `unsay/mcp.py` speaks JSON-RPC to `https://cockroachlabs.cloud/mcp` with a service-account key scoped to `mcp:read`, and `get_table_schema` returns the live definition of `fact` from the running cluster. Introspecting beats remembering: Cockroach Labs' stated reason for the server is that an agent working from a stale schema emits "brittle queries, schema mismatches, or unnecessary load". | live |
+| **ccloud CLI** | Installed and authenticated; used for control-plane inspection of the hosted cluster. See the feedback note below on why the application does *not* drive it. | partial |
 
-Status is per row on purpose. Anything marked "in progress" is not wired up
-yet, and this table is the single place to check what the artifact does versus
-what it is heading towards.
+Status is per row on purpose, and this table is the single place to check what
+the artifact does rather than what it intends to.
+
+**Feedback on ccloud, offered because the hackathon asks for it.** ccloud is
+presented as agent-ready, and its noun-verb shape and JSON output genuinely
+are. But `ccloud auth login` is browser OAuth only: version 0.8.23 accepts no
+API key, and `CCLOUD_API_KEY`, `COCKROACH_CLOUD_API_KEY`, `CC_API_KEY` and
+`CCLOUD_API_TOKEN` are all ignored. An agent therefore cannot authenticate it
+unattended, which is a real gap for the exact use the tool is being pitched
+for. Everything this project needed from the control plane (read cluster
+details, create a SQL user, provision a database) was done instead against the
+Cloud REST API with a service-account key, which does support headless auth.
+A `ccloud auth login --api-key` would close the gap.
 
 ### What the Agent Skills actually caught
 
@@ -211,8 +226,8 @@ below exists because the skill prompted it.
 
 | Service | How it is used | Status |
 |---|---|---|
-| **Amazon Bedrock** | Titan Text Embeddings V2 produces the 1024-dimension vectors `VECTOR(1024)` is sized for; all 331 claims in the corpus are embedded with it. Claude does the reasoning and picks its own citations. | embeddings **live**, Claude pending the Anthropic use-case form |
-| **AWS Lambda** | Scheduled openFDA ingestion and change detection. | planned |
+| **Amazon Bedrock** | Titan Text Embeddings V2 produces the 1024-dimension vectors `VECTOR(1024)` is sized for; all 554 claims are embedded with it. Claude Sonnet 4.5 reasons over retrieved claims and names its own citations. Haiku 4.5 does bulk fact extraction in the benchmark, where call volume is ~40x the answer path and the work is mechanical. | live |
+| **AWS Lambda** | Hosts the demo behind a public function URL. Chosen because it charges nothing while idle, and judging is four weeks of mostly idle. | live |
 | **Amazon S3** | Raw openFDA snapshots and signed audit exports. | planned |
 
 ---
@@ -239,9 +254,10 @@ Verified on a live 9-node, 3-region cluster:
 
 | Property | Result |
 |---|---|
-| Real openFDA ingestion | 250 live enforcement records to 331 lot-scoped claims in 40.7s |
-| Lot extraction | 270 of 331 claims (81.6%) resolved to a specific lot rather than a whole drug |
-| Idempotency | Re-ingesting the identical 331 claims produced **0** new versions |
+| Real openFDA ingestion | 400 live enforcement records to **554 claims** across **315 drugs**, embedded with Titan V2 |
+| Severity mix | 21 active Class I, 494 Class II, 39 Class III |
+| Lot extraction | **455 of 554 (82.1%)** resolved to a specific lot rather than a whole drug |
+| Idempotency | Re-ingesting identical claims produced **0** new versions |
 | Sweep correctness | Standing answers built on superseded evidence found and reversed |
 | Exactly-once | Sweep replayed after completion; outbox still held exactly 1 notice |
 | Replay agreement | Bitemporal reconstruction and `AS OF SYSTEM TIME` returned identical read sets inside the window |
@@ -253,19 +269,32 @@ Idempotency matters more than it looks. openFDA refreshes weekly and most
 records are unchanged. An ingester that versioned on every pass would fire 331
 spurious sweeps and, at the far end, 331 spurious messages to patients.
 
-**Which numbers used stub embeddings.** All of them, so far. The FDA records,
-the lot extraction, the versioning, the sweep, the exactly-once behaviour, the
-contention invariants and both replay routes are real and were measured on the
-live cluster. The *vectors* were not: every run to date set
-`UNSAY_ALLOW_FAKE_EMBEDDINGS=1`. The structural results hold exactly as
-stated, and no claim about **retrieval quality** has been earned yet.
+**Which numbers used stub embeddings.** Only the contention test, where the
+vectors are payload and the thing being measured is the database. Everything
+about the corpus, retrieval and answers now runs on real Titan V2 vectors.
 
-**Still to land:** re-ingestion against Bedrock Titan V2, then accuracy on the
-`knowledge-update` and `temporal-reasoning` subsets of
-[LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025) against
-the published baselines of Zep at 63.8% and Mem0 at 49.0%. Those are the two
-categories that measure exactly what this design targets, and the benchmark is
-external rather than one I wrote.
+### LongMemEval, and what it does not yet show
+
+[LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025) graded by
+its **own evaluator with the published GPT-4o judge**, not by me:
+
+| Run | Result |
+|---|---|
+| temporal-reasoning, **oracle** split, n=20 | **15/20 = 75%** |
+
+**This is not yet comparable to Zep's 63.8% or Mem0's 49.0%, and should not be
+presented as beating them.** Those figures are the temporal-reasoning sub-task
+measured on `longmemeval_s`, where the evidence sessions are buried in roughly
+115k tokens of distractors. The oracle split contains only the evidence, so it
+is a substantially easier task. A run against `s` is in progress; until it
+finishes, 75% says the pipeline works, not that it wins.
+
+Two further caveats worth stating rather than burying. At n=20 the 95%
+confidence interval is roughly ±19 points, so this is a signal and not a
+measurement. And Zep's Graphiti already stores `valid_at`/`invalid_at` on
+every node and edge, so **bitemporal storage is not itself a novelty against
+Zep**; what is different here is repairing past answers rather than only
+reconstructing them, and a replay that outlives the GC window.
 
 ---
 

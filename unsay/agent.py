@@ -229,6 +229,16 @@ def ask(
     answer_text = str(raw.get("answer", "")).strip()
     confidence = float(raw.get("confidence", 0.0))
 
+    # An "I cannot tell" answer cites nothing, because nothing was decisive.
+    # Left alone that makes it permanently unsweepable: no load-bearing read
+    # means no way for the sweep to ever find it, so a patient told "I don't
+    # know" would still be told that after the evidence arrived that answers
+    # them. An unknown is precisely the verdict new evidence should resolve,
+    # so the whole retrieved set counts as load-bearing: the answer rests on
+    # all of it having been insufficient.
+    if verdict == "unknown" and not cited:
+        cited = {c.fact_key for c in claims}
+
     verdict, forced = _clamp(verdict, claims)
     if forced:
         keys = ", ".join(c.fact_key for c in forced[:3])

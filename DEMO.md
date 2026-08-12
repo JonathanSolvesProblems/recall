@@ -100,9 +100,17 @@ narration over it.*
 
 - **Record the sweep beat first.** It is the only shot that must be perfect.
   Everything else can be re-shot cheaply.
-- **Real data only.** The FDA side is live openFDA. Do not seed a fake recall
-  to make the timing convenient; use a genuine Class I record and set the
-  dispensing history around it.
+- **Real data only, and the verified scenario is already picked.** Use
+  `amlodipine-besylate-and-benazepril-hydrochloride`, lot `GB01616`. Its only
+  recall in the corpus genuinely terminated on 2026-07-30 (a mislabelled
+  expiry date), so the honest opening verdict is CAUTION rather than SAFE, and
+  escalating that same fact_key to Class I gives a real CAUTION -> STOP
+  reversal. Verified end to end against the live demo: examined 1, reversed 1,
+  notified 1, in 3.14s.
+
+  Resist the urge to stage a SAFE opening. Every claim in the corpus is a
+  recall, so "safe" would require inventing a clean baseline, and the caution
+  reversal reads just as strongly without the invention.
 - **Do not narrate the architecture.** The two-plane schema, the bitemporal
   columns, and the vector index prefix belong in the README and the writeup.
   Naming them here costs seconds and buys nothing, because the judge cannot
