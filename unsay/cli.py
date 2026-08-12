@@ -185,6 +185,65 @@ def run_sweep(
     close_pool()
 
 
+@app.command("cluster-health")
+def cluster_health() -> None:
+    """Ask the control plane whether the cluster is fit to write to.
+
+    Uses the ccloud CLI rather than SQL: a SQL connection proves one query
+    answered, not that the cluster is out of maintenance or inside its spend
+    limit. Read-only; no ccloud verb here can change anything.
+    """
+    from unsay import ccloud
+
+    try:
+        v = ccloud.preflight()
+    except ccloud.CcloudUnavailable as exc:
+        console.print(f"[red]ccloud unavailable:[/red] {exc}")
+        raise typer.Exit(2) from exc
+
+    c = v["cluster"]
+    if c:
+        t = Table(title="control plane")
+        for col in ("name", "state", "plan", "version", "regions"):
+            t.add_column(col)
+        t.add_row(c["name"], c["state"], str(c["plan"]), str(c["version"]),
+                  ",".join(c["regions"] or []))
+        console.print(t)
+    console.print(
+        f"[green]ready[/green]: {v['reason']}" if v["ok"]
+        else f"[red]not ready[/red]: {v['reason']}"
+    )
+    close_pool()
+    if not v["ok"]:
+        raise typer.Exit(1)
+
+
+@app.command()
+def audit(limit: int = typer.Option(25, help="most recent entries")) -> None:
+    """Every mutation to memory, in order. The observability surface.
+
+    memory_audit is appended to inside the same transaction as the change it
+    describes, so an entry cannot exist for a change that rolled back, and a
+    change cannot commit without its entry.
+    """
+    rows = query(
+        """
+        SELECT at, actor, action, target, detail
+          FROM memory_audit ORDER BY at DESC LIMIT %s
+        """,
+        (limit,),
+    )
+    t = Table(title=f"memory audit (last {len(rows)})")
+    for col in ("when", "actor", "action", "target", "detail"):
+        t.add_column(col)
+    for r in rows:
+        d = r["detail"] if isinstance(r["detail"], dict) else json.loads(r["detail"] or "{}")
+        t.add_row(str(r["at"])[:19], r["actor"], r["action"],
+                  str(r["target"])[:44], json.dumps(d)[:52])
+    console.print(t)
+    close_pool()
+
+
 @app.command()
 def outbox(pending_only: bool = typer.Option(False, "--pending")) -> None:
     """Show queued patient notifications."""

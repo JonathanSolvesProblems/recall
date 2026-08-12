@@ -51,3 +51,7 @@ bench/results/
 # Lambda build artifacts
 .build/
 deploy/*.zip
+bench/data/extracted/
+
+# Recording workspace: raw takes, screen captures, scratch narration
+broll/

@@ -216,7 +216,14 @@ def wipe() -> None:
     run_in_txn(work, label="bench_wipe")
 
 
-def load_instance(inst: dict, workers: int) -> int:
+CACHE = DATA_DIR / "extracted"
+
+
+def _cache_path(qid: str, split: str) -> pathlib.Path:
+    return CACHE / f"{split}_{qid}.json"
+
+
+def load_instance(inst: dict, workers: int, split: str = "oracle", use_cache: bool = True) -> int:
     """Assert every session of one instance, in chronological order.
 
     Order matters and is the point: sessions are sorted by date so that a later
@@ -226,15 +233,32 @@ def load_instance(inst: dict, workers: int) -> int:
     sessions = list(zip(inst["haystack_dates"], inst["haystack_sessions"]))
     sessions.sort(key=lambda p: parse_date(p[0]))
 
+    # Extraction is ~98% of the cost of a run and does not depend on the
+    # retrieval width being evaluated. Cached to disk so k can be swept for
+    # the price of the answer calls alone, instead of re-paying for 47
+    # extractions per instance every time.
+    cache_file = _cache_path(inst["question_id"], split)
+    cached: list[list[dict]] | None = None
+    if use_cache and cache_file.exists():
+        try:
+            cached = json.loads(cache_file.read_text(encoding="utf-8"))
+        except Exception:
+            cached = None
+
+    fresh: list[list[dict]] = []
     total = 0
     # Sessions are processed strictly in order and one at a time, because each
     # extraction is shown the keys the previous ones stored. Parallelising the
     # extractions would mean every session sees an empty key list and invents
     # its own naming, which is the bug this ordering fixes. Embedding within a
     # session is still concurrent.
-    for date_str, turns in sessions:
+    for si, (date_str, turns) in enumerate(sessions):
         when = parse_date(date_str)
-        facts = extract_facts(render_session(turns))
+        if cached is not None and si < len(cached):
+            facts = cached[si]
+        else:
+            facts = extract_facts(render_session(turns))
+        fresh.append(facts)
         if not facts:
             continue
         with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -258,6 +282,10 @@ def load_instance(inst: dict, workers: int) -> int:
                 label="lme_assert",
             )
             total += 1
+
+    if use_cache and cached is None:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps(fresh), encoding="utf-8")
     return total
 
 
@@ -310,6 +338,8 @@ def main() -> int:
                     help="oracle = evidence sessions only (easy). "
                          "s = evidence buried in ~115k tokens of distractors, "
                          "which is what the published baselines use.")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="re-extract instead of reusing cached facts")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -353,7 +383,8 @@ def main() -> int:
         for i, inst in enumerate(items, 1):
             try:
                 wipe()
-                n = load_instance(inst, args.workers)
+                n = load_instance(inst, args.workers, split=args.split,
+                                  use_cache=not args.no_cache)
                 hyp = answer(inst["question"], args.k)
             except Exception as exc:
                 # One instance failing must not cost the hours already spent.
