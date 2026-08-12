@@ -15,12 +15,15 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 from unsay import memory, sweep
 from unsay.config import settings
@@ -28,6 +31,13 @@ from unsay.config import settings
 log = logging.getLogger(__name__)
 
 _client = None
+
+# Bedrock conditions worth replaying rather than surfacing.
+THROTTLE_CODES = {
+    "ThrottlingException", "TooManyRequestsException",
+    "ServiceUnavailableException", "ModelTimeoutException",
+    "InternalServerException",
+}
 
 SYSTEM = """You are a medication-safety assistant for a pharmacy.
 
@@ -108,12 +118,29 @@ def call_text(
     if prefill:
         messages.append({"role": "assistant", "content": [{"text": prefill}]})
 
-    resp = client().converse(
-        modelId=model_id or cfg.bedrock_model_id,
-        system=[{"text": system}],
-        messages=messages,
-        inferenceConfig={"maxTokens": max_tokens, "temperature": 0.0},
-    )
+    # Same explicit backoff the embedding path uses. A new AWS account's
+    # default Bedrock quota is low, and botocore's adaptive retry alone was
+    # not enough: a benchmark at six concurrent workers exhausted it and died
+    # after ten instances. Throttling is an expected condition on bulk work,
+    # not an error worth propagating.
+    for attempt in range(1, 7):
+        try:
+            resp = client().converse(
+                modelId=model_id or cfg.bedrock_model_id,
+                system=[{"text": system}],
+                messages=messages,
+                inferenceConfig={"maxTokens": max_tokens, "temperature": 0.0},
+            )
+            break
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code not in THROTTLE_CODES or attempt == 6:
+                raise
+            delay = min(1.0 * (2 ** (attempt - 1)), 30.0)
+            delay += random.uniform(0, delay)
+            log.warning("converse: %s on attempt %d/6, retrying in %.1fs", code, attempt, delay)
+            time.sleep(delay)
+
     text = resp["output"]["message"]["content"][0]["text"]
     return ((prefill or "") + text).strip()
 
