@@ -325,6 +325,8 @@ unsay status          # eu-west-1 DOWN, survival goal holds
 unsay sweep           # completes; outbox count does not double
 ```
 
+**Full verification steps, ordered by effort, are in [TESTING.md](TESTING.md).**
+
 Evidence scripts, all runnable without AWS via `UNSAY_ALLOW_FAKE_EMBEDDINGS=1`:
 
 | Script | Proves |

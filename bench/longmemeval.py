@@ -111,6 +111,10 @@ def render_session(turns: list[dict]) -> str:
 # whose updating session simply never landed.
 EXTRACT_FAILURES: list[str] = []
 
+# Instances abandoned mid-run. Reported, never scored: an instance that never
+# ran is not an instance the system got wrong.
+SKIPPED: list[str] = []
+
 
 def known_keys() -> list[tuple[str, str]]:
     """Attributes already recorded, newest believed version of each."""
@@ -324,15 +328,41 @@ def main() -> int:
 
     RESULTS.mkdir(exist_ok=True)
     out = pathlib.Path(args.out) if args.out else RESULTS / "hypotheses.jsonl"
-    print(f"{len(items)} instances across {sorted(wanted)}")
-    print(f"model: {settings().bedrock_model_id}\nwriting: {out}\n")
+
+    # Resume. On a constrained Bedrock quota an s-split run is measured in
+    # hours, and losing all of it to one unrecoverable throttle after four
+    # hours is the difference between a number and no number. Instances
+    # already written are skipped and the file is appended to.
+    done: set[str] = set()
+    if out.exists():
+        for line in out.read_text(encoding="utf-8").splitlines():
+            try:
+                done.add(json.loads(line)["question_id"])
+            except Exception:
+                continue
+    if done:
+        print(f"resuming: {len(done)} instance(s) already in {out}")
+    items = [i for i in items if i["question_id"] not in done]
+
+    print(f"{len(items)} instances to run across {sorted(wanted)}")
+    print(f"answer model: {settings().bedrock_model_id}")
+    print(f"extract model: {settings().bedrock_extract_model_id}\nwriting: {out}\n")
 
     started = time.time()
-    with open(out, "w", encoding="utf-8") as fh:
+    with open(out, "a", encoding="utf-8") as fh:
         for i, inst in enumerate(items, 1):
-            wipe()
-            n = load_instance(inst, args.workers)
-            hyp = answer(inst["question"], args.k)
+            try:
+                wipe()
+                n = load_instance(inst, args.workers)
+                hyp = answer(inst["question"], args.k)
+            except Exception as exc:
+                # One instance failing must not cost the hours already spent.
+                # It is recorded as skipped rather than scored, so it cannot
+                # be silently counted as a wrong answer.
+                log.warning("instance %s failed, skipping: %s",
+                            inst["question_id"], str(exc)[:160])
+                SKIPPED.append(inst["question_id"])
+                continue
             fh.write(json.dumps({
                 "question_id": inst["question_id"],
                 "question_type": inst["question_type"],
@@ -346,6 +376,11 @@ def main() -> int:
                   f"gold={str(inst['answer'])[:34]:36s} got={hyp[:42]}")
 
     print(f"\n{len(items)} answered in {time.time() - started:.0f}s -> {out}")
+    if SKIPPED:
+        print(f"\nSKIPPED {len(SKIPPED)} instance(s) that failed mid-run. They are "
+              f"absent from the output, not scored as wrong:")
+        for q in SKIPPED[:8]:
+            print(f"  {q}")
     if EXTRACT_FAILURES:
         print(f"\nWARNING: {len(EXTRACT_FAILURES)} session(s) failed extraction after "
               f"retries. Those instances measure ingestion, not memory, and their "
