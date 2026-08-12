@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from unsay import agent, demo, embeddings, memory, sweep
+from unsay import agent, budget, demo, embeddings, memory, sweep
 from unsay.db import close_pool, query, run_in_txn
 from unsay.ingest import Claim, assert_claim
 
@@ -94,13 +94,18 @@ def status() -> dict[str, Any]:
     )[0]
 
     goal = query("SHOW SURVIVAL GOAL FROM DATABASE unsay")[0]["survival_goal"]
-    return {"regions": regions, "survival_goal": goal, "counts": counts}
+    return {"regions": regions, "survival_goal": goal, "counts": counts,
+            "budget": budget.spent_today()}
 
 
 @app.post("/api/ask")
 def ask(req: AskRequest) -> dict[str, Any]:
     if not req.question.strip():
         raise HTTPException(400, "question is required")
+    try:
+        budget.charge(caller="ask", n=1)
+    except budget.BudgetExceeded as exc:
+        raise HTTPException(429, str(exc)) from exc
     a = agent.ask(
         req.question, subject_id=req.subject or None, patient_id=req.patient_id or None
     )
@@ -201,6 +206,8 @@ def demo_reset(patients: int = 12) -> dict[str, Any]:
     The sweep is destructive by design, so without this the demo works exactly
     once and every judge after the first sees a button that does nothing.
     """
+    # Reset is free after the first one: the opening answer is cached, so this
+    # spends nothing on the model and can safely run on every page load.
     return demo.reset(patients=max(1, min(patients, 16)))
 
 
@@ -226,6 +233,12 @@ def candidates() -> list[dict]:
 
 @app.post("/api/sweep/run")
 def run_sweep() -> dict[str, Any]:
+    # One call per distinct question after memoisation, but charge for a few
+    # so a sweep cannot be looped cheaply.
+    try:
+        budget.charge(caller="sweep", n=3)
+    except budget.BudgetExceeded as exc:
+        raise HTTPException(429, str(exc)) from exc
     summary = sweep.run_sweep(
         reevaluate=agent.reevaluate, trigger_kind="api", trigger_ref="demo"
     )

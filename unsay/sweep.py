@@ -276,14 +276,32 @@ def run_sweep(
         if not batch:
             break
 
-        # Re-evaluations are independent: each candidate is re-decided against
-        # current memory on its own. Run sequentially, twelve of them took 42
-        # seconds, nearly all of it waiting on the model. Concurrency here is
-        # bounded rather than unlimited because the whole batch hitting Bedrock
-        # at once trades one queue for another, and the call path already backs
-        # off on throttling.
-        with ThreadPoolExecutor(max_workers=min(concurrency, len(batch))) as ex:
-            decided = list(ex.map(reevaluate, batch))
+        # Two candidates asking the same question about the same drug are
+        # re-decided against the same evidence and get the same answer, so the
+        # second call buys nothing and costs the same as the first. On the
+        # demo cohort that is twelve identical calls; memoising takes it to
+        # one. Real traffic has varied questions and sees little benefit,
+        # which is the correct shape: this saves money exactly where the work
+        # was redundant.
+        #
+        # Scoped to a single sweep. Across sweeps the evidence has moved by
+        # definition, so a cache that outlived one would return stale verdicts,
+        # which is the failure this whole project exists to prevent.
+        memo: dict[tuple[str, str], tuple[str, str]] = {}
+
+        def decide(c: Candidate) -> tuple[str, str]:
+            key = (c.question, c.stale[0]["fact_key"] if c.stale else "")
+            if key not in memo:
+                memo[key] = reevaluate(c)
+            return memo[key]
+
+        # Distinct questions still run concurrently; identical ones collapse.
+        unique = list({(c.question, c.stale[0]["fact_key"] if c.stale else ""): c
+                       for c in batch}.values())
+        with ThreadPoolExecutor(max_workers=min(concurrency, max(1, len(unique)))) as ex:
+            for c, res in zip(unique, ex.map(reevaluate, unique)):
+                memo[(c.question, c.stale[0]["fact_key"] if c.stale else "")] = res
+        decided = [decide(c) for c in batch]
 
         # Corrections are applied in order, on this thread. They are the part
         # that writes, and serialising them keeps the outbox insert order

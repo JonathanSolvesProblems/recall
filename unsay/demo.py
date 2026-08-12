@@ -72,6 +72,13 @@ def reset(patients: int = 12) -> dict:
     Bedrock round trip instead of twelve. The sweep afterwards re-decides every
     one of them for real.
     """
+    # The opening answer is the same every time: same question, same drug, same
+    # claims, temperature pinned at 0. Re-asking the model on every reset would
+    # spend a Bedrock call each time the page auto-restores, which on a public
+    # URL is an open tap. It is cached after the first reset and only recomputed
+    # if the cache is missing.
+    baseline = _cached_baseline()
+
     run_in_txn(_clear, label="demo_clear")
 
     names = NAMES[:patients]
@@ -98,21 +105,72 @@ def reset(patients: int = 12) -> dict:
 
         ids.append(str(run_in_txn(add, label="demo_patient")))
 
-    answer = agent.ask(QUESTION, subject_id=SUBJECT, persist=False)
     claims = memory.retrieve(QUESTION, subject_id=SUBJECT, k=8)
-    cited = answer.cited or {c.fact_key for c in claims}
+    cited = set(baseline["cited"]) or {c.fact_key for c in claims}
 
     for pid in ids:
         memory.record_decision(
-            question=QUESTION, answer=answer.answer, verdict=answer.verdict,
-            confidence=answer.confidence, model_id="demo-reset",
+            question=QUESTION, answer=baseline["answer"], verdict=baseline["verdict"],
+            confidence=baseline["confidence"], model_id="demo-reset",
             retrieved=claims, cited=cited, patient_id=pid,
         )
 
-    log.info("demo reset: %d patients, opening verdict %s", len(ids), answer.verdict)
+    log.info("demo reset: %d patients, opening verdict %s", len(ids), baseline["verdict"])
     return {
         "patients": len(ids),
-        "verdict": answer.verdict,
+        "verdict": baseline["verdict"],
         "subject": SUBJECT,
         "lot": LOT,
+        "model_calls": baseline["model_calls"],
     }
+
+
+BASELINE_DDL = """
+CREATE TABLE IF NOT EXISTS demo_baseline (
+    id         INT2 PRIMARY KEY DEFAULT 1,
+    verdict    STRING NOT NULL,
+    answer     STRING NOT NULL,
+    confidence FLOAT8 NOT NULL,
+    cited      JSONB  NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+"""
+
+
+def _cached_baseline() -> dict:
+    """The opening answer, computed once and reused by every later reset.
+
+    Deterministic by construction: same question, same drug, same believed
+    claims, temperature pinned at 0. Asking the model again on every reset
+    would spend a Bedrock call each time the page auto-restores itself, and on
+    an unauthenticated public URL that is an open tap for anyone reloading.
+    """
+    import json as _json
+
+    from unsay.db import query
+
+    run_in_txn(lambda c: c.execute(BASELINE_DDL), label="baseline_ddl")
+    rows = query("SELECT verdict, answer, confidence, cited FROM demo_baseline WHERE id = 1")
+    if rows:
+        r = rows[0]
+        cited = r["cited"] if isinstance(r["cited"], list) else _json.loads(r["cited"])
+        return {**r, "cited": cited, "model_calls": 0}
+
+    a = agent.ask(QUESTION, subject_id=SUBJECT, persist=False)
+    cited = sorted(a.cited)
+
+    def store(conn):
+        conn.execute(
+            """
+            INSERT INTO demo_baseline (id, verdict, answer, confidence, cited)
+            VALUES (1, %s, %s, %s, %s::JSONB)
+            ON CONFLICT (id) DO UPDATE SET verdict = excluded.verdict,
+                answer = excluded.answer, confidence = excluded.confidence,
+                cited = excluded.cited
+            """,
+            (a.verdict, a.answer, a.confidence, _json.dumps(cited)),
+        )
+
+    run_in_txn(store, label="baseline_store")
+    return {"verdict": a.verdict, "answer": a.answer, "confidence": a.confidence,
+            "cited": cited, "model_calls": 1}
