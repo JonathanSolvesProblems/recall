@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 import psycopg
@@ -246,6 +247,7 @@ def run_sweep(
     trigger_ref: str = "",
     subject_id: str | None = None,
     limit: int | None = None,
+    concurrency: int = 4,
 ) -> dict[str, Any]:
     """Find every affected answer, re-decide it, and queue the corrections.
 
@@ -270,11 +272,24 @@ def run_sweep(
         if not page:
             break
 
-        for candidate in page:
-            if limit is not None and seen >= limit:
-                break
+        batch = page if limit is None else page[: max(0, limit - seen)]
+        if not batch:
+            break
+
+        # Re-evaluations are independent: each candidate is re-decided against
+        # current memory on its own. Run sequentially, twelve of them took 42
+        # seconds, nearly all of it waiting on the model. Concurrency here is
+        # bounded rather than unlimited because the whole batch hitting Bedrock
+        # at once trades one queue for another, and the call path already backs
+        # off on throttling.
+        with ThreadPoolExecutor(max_workers=min(concurrency, len(batch))) as ex:
+            decided = list(ex.map(reevaluate, batch))
+
+        # Corrections are applied in order, on this thread. They are the part
+        # that writes, and serialising them keeps the outbox insert order
+        # stable and the transactions uncontended.
+        for candidate, (verdict, answer) in zip(batch, decided):
             seen += 1
-            verdict, answer = reevaluate(candidate)
             reevaluated += 1
             if verdict != candidate.verdict:
                 reversed_ += 1

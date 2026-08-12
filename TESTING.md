@@ -23,7 +23,7 @@ Walk the four numbered steps on the page, in order:
 | 1 | Pick a patient from the dropdown, click **Ask** | **CAUTION**. Beneath it, the FDA claim it read, with the fact key and version. The bold left rule marks a load-bearing read |
 | 2 | Click **Publish Class I recall** | The same fact key moves `v1 → v2`, prior version retracted |
 | 3 | Click **Find affected answers** | **12** standing answers, each listing the fact version it stood on |
-| 3 | Click **Run sweep** | ~45s. Then **12 reversed**, 12 examined, 12 notified |
+| 3 | Click **Run sweep** | ~20s. Then **12 reversed**, 12 examined, 12 notified |
 | 4 | Scroll down | Twelve correction notices, each naming a person, each `CAUTION → STOP`, each with a once-only key |
 
 Then click **Run sweep** a second time. The outbox still holds **12** notices,
@@ -31,7 +31,12 @@ not 24: the dedupe key is derived from the correction itself, so a replayed
 sweep is a no-op. This is the exactly-once claim, and it is the one worth
 checking yourself because it is the easiest to assert and hardest to believe.
 
-To reset the demo to its opening state, see section 4.
+**The demo restores itself.** The sweep is destructive by design: it moves
+every standing answer to `reversed`, so a second visitor would otherwise find
+the buttons do nothing. Loading the page checks `/api/demo/state` and, if the
+previous visitor spent the scenario, restores it before you touch anything.
+There is also a **Reset demo** button in step 4 if you want to run it twice
+yourself.
 
 ### What section 1 does *not* show
 

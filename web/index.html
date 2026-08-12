@@ -142,7 +142,14 @@
     <h2><span class="n">4</span> Corrections, by name</h2>
     <p class="sub">Each written in the same transaction as the correction that
       justifies it, keyed so a replayed sweep cannot send a second time.</p>
-    <div class="body"><div id="outbox"><span class="empty">Nothing corrected yet. Run steps 1 to 3.</span></div></div>
+    <div class="body">
+      <div class="row" style="margin-bottom:12px">
+        <button id="resetBtn" class="ghost">Reset demo</button>
+        <span class="muted" id="resetNote">The sweep is destructive by design.
+          Reset restores the twelve standing answers so the next visitor sees
+          the story unspent.</span>
+      </div>
+      <div id="outbox"><span class="empty">Nothing corrected yet. Run steps 1 to 3.</span></div></div>
   </section>
 </main>
 
@@ -250,7 +257,33 @@ async function loadOutbox(){
   }catch(e){}
 }
 
-status(); loadPatients(); loadOutbox();
+$("#resetBtn").onclick = async () => {
+  const b = $("#resetBtn"); b.disabled = true;
+  $("#resetNote").innerHTML = `<span class="spin"></span> restoring the scenario…`;
+  try{
+    const r = await j("/api/demo/reset", {method:"POST"});
+    $("#resetNote").textContent =
+      `Restored: ${r.patients} patients, opening verdict ${r.verdict.toUpperCase()}.`;
+    $("#sweepOut").innerHTML = ""; $("#supOut").innerHTML = ""; $("#answer").innerHTML = "";
+    await loadPatients(); await loadOutbox(); await status();
+  }catch(e){ $("#resetNote").textContent = "reset failed: " + (e.message||e); }
+  b.disabled = false;
+};
+
+// A judge should never land on a demo the previous visitor already spent.
+async function autoResetIfSpent(){
+  try{
+    const st = await j("/api/demo/state");
+    if(st.spent){
+      $("#resetNote").innerHTML = `<span class="spin"></span> previous visitor ran the sweep; restoring…`;
+      await j("/api/demo/reset", {method:"POST"});
+      $("#resetNote").textContent = "Restored automatically after the previous visitor.";
+      await loadPatients(); await loadOutbox(); await status();
+    }
+  }catch(e){}
+}
+
+status(); loadPatients(); loadOutbox(); autoResetIfSpent();
 setInterval(status, 8000);
 </script>
 </body>

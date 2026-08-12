@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from unsay import agent, embeddings, memory, sweep
+from unsay import agent, demo, embeddings, memory, sweep
 from unsay.db import close_pool, query, run_in_txn
 from unsay.ingest import Claim, assert_claim
 
@@ -192,6 +192,21 @@ def supersede(req: SupersedeRequest) -> dict[str, Any]:
         lambda c: assert_claim(c, claim, vector), label="demo_supersede"
     )
     return {"fact_key": claim.fact_key, "version": version, "changed": changed, "claim": text}
+
+
+@app.post("/api/demo/reset")
+def demo_reset(patients: int = 12) -> dict[str, Any]:
+    """Restore the scenario so the next visitor sees it unspent.
+
+    The sweep is destructive by design, so without this the demo works exactly
+    once and every judge after the first sees a button that does nothing.
+    """
+    return demo.reset(patients=max(1, min(patients, 16)))
+
+
+@app.get("/api/demo/state")
+def demo_state() -> dict[str, Any]:
+    return {"spent": demo.is_spent(), "subject": demo.SUBJECT, "lot": demo.LOT}
 
 
 @app.get("/api/sweep/candidates")

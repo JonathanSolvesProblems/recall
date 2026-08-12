@@ -152,6 +152,15 @@ still answers.
                      signed audit exports
 ```
 
+**There are two clusters, and they do different jobs.** The diagram above is
+the local one: 9 nodes, 3 simulated AWS regions, `SURVIVE REGION FAILURE`,
+which is what `docker compose` brings up and what the region-kill demo runs
+against. The **hosted demo** is CockroachDB Cloud **Basic**, which is
+single-region by design, so `/api/status` there reports one region and a
+`zone` survival goal. That is not a discrepancy; multi-region on Cloud is an
+Advanced-tier feature with custom pricing, and multi-region is not this
+project's thesis. Every measured result below states which cluster produced it.
+
 Three properties carry the design.
 
 **Provenance is written atomically with the answer.** The decision row and its
@@ -250,7 +259,16 @@ and picks the citations; it just cannot answer away a recall.
 
 ## What is measured
 
-Verified on a live 9-node, 3-region cluster:
+**From recall publication to twelve named patients, corrected: 42 seconds.**
+
+The 2024 study this project is built on found it "was not possible to trace a
+medication prescription to specific lot numbers dispensed to that patient", so
+today a Class II recall stops at the pharmacy. The run below starts from the
+FDA escalating a lot and ends with twelve people identified by name and
+individually corrected. That is the number worth carrying out of this README;
+everything under it is how it is true.
+
+Measured on the **hosted** cluster unless the row says local:
 
 | Property | Result |
 |---|---|
