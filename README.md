@@ -291,28 +291,33 @@ spurious sweeps and, at the far end, 331 spurious messages to patients.
 vectors are payload and the thing being measured is the database. Everything
 about the corpus, retrieval and answers now runs on real Titan V2 vectors.
 
-### LongMemEval, and what it does not yet show
+### LongMemEval: measured, and it does not support the claim
 
-[LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025) graded by
-its **own evaluator with the published GPT-4o judge**, not by me:
+I ran [LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025) on
+its hard `longmemeval_s` split, graded by its own evaluator with the published
+GPT-4o judge. The results are worse than the systems it would be compared to:
 
 | Run | Result |
 |---|---|
-| temporal-reasoning, **oracle** split, n=20 | **15/20 = 75%** |
+| temporal-reasoning, `s` split, n=39, k=10 | **20.5%** |
+| same 12 instances, k=10 vs k=40 | 25% → 33.3% |
+| Published: Zep / Graphiti, same sub-task | 63.8% |
+| Published: Mem0, same sub-task | 49.0% |
 
-**This is not yet comparable to Zep's 63.8% or Mem0's 49.0%, and should not be
-presented as beating them.** Those figures are the temporal-reasoning sub-task
-measured on `longmemeval_s`, where the evidence sessions are buried in roughly
-115k tokens of distractors. The oracle split contains only the evidence, so it
-is a substantially easier task. A run against `s` is in progress; until it
-finishes, 75% says the pipeline works, not that it wins.
+The failure mode is specific and worth stating: **25 of 31 wrong answers were
+"I don't know"**, not confident errors. With a median of 125 facts stored per
+instance and a retrieval window of 10, the model mostly never sees the fact it
+needs. Widening to 40 helped by one answer in twelve, which at that sample size
+is noise, and left the gap roughly intact.
 
-Two further caveats worth stating rather than burying. At n=20 the 95%
-confidence interval is roughly ±19 points, so this is a signal and not a
-measurement. And Zep's Graphiti already stores `valid_at`/`invalid_at` on
-every node and edge, so **bitemporal storage is not itself a novelty against
-Zep**; what is different here is repairing past answers rather than only
-reconstructing them, and a replay that outlives the GC window.
+So this is a retrieval problem, not a storage one, and it is unsolved here. I
+stopped rather than spend further on tuning, because the claims this project
+actually makes (repairing past answers, and a replay that outlives the GC
+window) are demonstrated by `scripts/expiry.py` and the sweep, and neither
+depends on this benchmark.
+
+It is reported because it was run. A number that came out badly is still a
+measurement, and omitting it would leave the impression it was never tried.
 
 ---
 
