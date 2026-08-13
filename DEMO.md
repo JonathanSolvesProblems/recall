@@ -51,13 +51,15 @@ over it.
 
 **Screen:** the corrections list populating with names.
 
-> "Twelve people were told to keep taking it. Here they are, by name. Each
-> one re-decided against what the FDA knows today, each one a correction
-> drafted for a pharmacist to sign off."
+> "Twelve people were told to keep taking it. Every one is re-decided against
+> what the FDA knows today. Nine of them change, and those nine get a
+> correction drafted for a pharmacist to sign. The other three had already
+> been told to stop, so they are left alone. Nobody gets a message they do
+> not need."
 
 *This is the peak. Hold on the named list, not on the counter. The real run
-takes about 45 seconds for twelve; cut or speed-ramp the middle, but let the
-names land one by one at the start and end.*
+takes about 4 seconds for twelve, so there is nothing to hide. Let the names
+land.*
 
 ### 0:52 - 1:12 | It does not stop
 **Screen:** terminal, `docker compose stop crdb-euw1-*`, mid-sweep.
@@ -108,8 +110,8 @@ narration over it.*
   recall in the corpus genuinely terminated on 2026-07-30 (a mislabelled
   expiry date), so the honest opening verdict is CAUTION rather than SAFE, and
   escalating that same fact_key to Class I gives a real CAUTION -> STOP
-  reversal. Verified end to end against the live demo: examined 1, reversed 1,
-  notified 1, in 3.14s.
+  reversal. Verified end to end against the live demo: examined 12, reversed 9,
+  notified 9, in about 4 seconds.
 
   Resist the urge to stage a SAFE opening. Every claim in the corpus is a
   recall, so "safe" would require inventing a clean baseline, and the caution

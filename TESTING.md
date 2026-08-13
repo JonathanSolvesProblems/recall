@@ -23,11 +23,11 @@ Walk the four numbered steps on the page, in order:
 | 1 | Pick a patient from the dropdown, click **Ask** | **CAUTION**. Beneath it, the FDA claim it read, with the fact key and version. The bold left rule marks a load-bearing read |
 | 2 | Click **Publish Class I recall** | The same fact key moves `v1 → v2`, prior version retracted |
 | 3 | Click **Find affected answers** | **12** standing answers, each listing the fact version it stood on |
-| 3 | Click **Run sweep** | ~20s. Then **12 reversed**, 12 examined, 12 notified |
-| 4 | Scroll down | Twelve correction notices, each naming a person, each `CAUTION → STOP`, each with a once-only key |
+| 3 | Click **Run sweep** | ~4s. Then **12 examined, 9 reversed, 9 notified**. The other three had already said stop, so they are reaffirmed rather than corrected, and are deliberately not notified |
+| 4 | Scroll down | Nine correction notices, each naming a person, each `CAUTION → STOP`, each with a once-only key. Four distinct texts, because the twelve asked in four different phrasings |
 
-Then click **Run sweep** a second time. The outbox still holds **12** notices,
-not 24: the dedupe key is derived from the correction itself, so a replayed
+Then click **Run sweep** a second time. The outbox still holds **9** notices,
+not 18: the dedupe key is derived from the correction itself, so a replayed
 sweep is a no-op. This is the exactly-once claim, and it is the one worth
 checking yourself because it is the easiest to assert and hardest to believe.
 
@@ -97,7 +97,7 @@ UNSAY_ALLOW_FAKE_EMBEDDINGS=1 .venv/Scripts/python scripts/expiry.py
 UNSAY_ALLOW_FAKE_EMBEDDINGS=1 .venv/Scripts/python scripts/concurrency.py 64 4
 ```
 
-### `smoke.py` — the full lifecycle
+### `smoke.py`: the full lifecycle
 
 Asserts a claim, answers with provenance, supersedes, sweeps, corrects,
 notifies, then replays the sweep. Ends `SMOKE PASSED`. Checks in order:
@@ -109,7 +109,7 @@ notifies, then replays the sweep. Ends `SMOKE PASSED`. Checks in order:
 - the sweep finds exactly the affected answer
 - a replayed sweep leaves the outbox at exactly 1
 
-### `expiry.py` — the claim that most needs checking
+### `expiry.py`: the claim that most needs checking
 
 Asks one question two ways at 45 days back. Ends
 `PASSED: replay outlives the garbage-collection window.`
@@ -127,7 +127,7 @@ The control is the part that matters. Inside the window the two routes agree
 exactly, so the bitemporal model is reconstructing real history rather than a
 convenient one. Past the horizon only one still answers.
 
-### `concurrency.py` — invariants under contention
+### `concurrency.py`: invariants under contention
 
 `64 4` runs 64 writers with 16 racing on each of 4 claims. Ends
 `CONTENTION TEST PASSED`, having checked that version chains are dense

@@ -28,6 +28,20 @@ SUBJECT = "amlodipine-besylate-and-benazepril-hydrochloride"
 LOT = "GB01616"
 QUESTION = f"My amlodipine and benazepril is from lot {LOT}. Is it safe to keep taking?"
 
+# Real patients do not ask in chorus. Four phrasings so the sweep produces four
+# genuinely different re-decisions rather than one answer repeated twelve times,
+# which reads as a mail-merge and undersells what actually happened. Still
+# memoised per distinct question, so a sweep costs four model calls, not twelve.
+QUESTIONS = [
+    QUESTION,
+    f"I take amlodipine/benazepril for blood pressure, lot {LOT}. Should I stop?",
+    # Not "was it recalled?": that reads as a yes/no about the recall existing
+    # and opens at STOP even when the recall has terminated, which is a
+    # different scenario from the caution-to-stop reversal this demo shows.
+    f"Should I be worried about my blood pressure tablets, lot {LOT}?",
+    f"Is there any problem with lot {LOT} of amlodipine and benazepril?",
+]
+
 NAMES = [
     "Margaret Hale", "Daniel Okafor", "Priya Raman", "Tomas Alvarez",
     "Ruth Bernstein", "Wei Chen", "Aisha Farouk", "Colm Doherty",
@@ -66,18 +80,18 @@ def _clear(conn: psycopg.Connection) -> None:
 def reset(patients: int = 12) -> dict:
     """Restore the scenario to its opening state.
 
-    One model call, replicated across the cohort. Everyone asking the same
-    question about the same lot genuinely receives the same answer, so sharing
-    it is faithful rather than a shortcut, and it keeps a reset to a single
-    Bedrock round trip instead of twelve. The sweep afterwards re-decides every
-    one of them for real.
+    Patients are spread across four phrasings of the same concern. Everyone
+    asking a given phrasing about the same lot genuinely receives the same
+    answer, so sharing it within a phrasing is faithful rather than a shortcut,
+    and a reset costs four Bedrock round trips the first time and none
+    afterwards. The sweep re-decides all of them against current memory.
     """
     # The opening answer is the same every time: same question, same drug, same
     # claims, temperature pinned at 0. Re-asking the model on every reset would
     # spend a Bedrock call each time the page auto-restores, which on a public
     # URL is an open tap. It is cached after the first reset and only recomputed
     # if the cache is missing.
-    baseline = _cached_baseline()
+    baselines = [_cached_baseline(q, i) for i, q in enumerate(QUESTIONS)]
 
     run_in_txn(_clear, label="demo_clear")
 
@@ -106,16 +120,19 @@ def reset(patients: int = 12) -> dict:
         ids.append(str(run_in_txn(add, label="demo_patient")))
 
     claims = memory.retrieve(QUESTION, subject_id=SUBJECT, k=8)
-    cited = set(baseline["cited"]) or {c.fact_key for c in claims}
 
-    for pid in ids:
+    for n, pid in enumerate(ids):
+        b = baselines[n % len(baselines)]
         memory.record_decision(
-            question=QUESTION, answer=baseline["answer"], verdict=baseline["verdict"],
-            confidence=baseline["confidence"], model_id="demo-reset",
-            retrieved=claims, cited=cited, patient_id=pid,
+            question=QUESTIONS[n % len(QUESTIONS)], answer=b["answer"],
+            verdict=b["verdict"], confidence=b["confidence"], model_id="demo-reset",
+            retrieved=claims, cited=set(b["cited"]) or {c.fact_key for c in claims},
+            patient_id=pid,
         )
 
-    log.info("demo reset: %d patients, opening verdict %s", len(ids), baseline["verdict"])
+    baseline = baselines[0]
+    log.info("demo reset: %d patients across %d phrasings, opening verdict %s",
+             len(ids), len(QUESTIONS), baseline["verdict"])
     return {
         "patients": len(ids),
         "verdict": baseline["verdict"],
@@ -127,7 +144,7 @@ def reset(patients: int = 12) -> dict:
 
 BASELINE_DDL = """
 CREATE TABLE IF NOT EXISTS demo_baseline (
-    id         INT2 PRIMARY KEY DEFAULT 1,
+    id         INT2 PRIMARY KEY,
     verdict    STRING NOT NULL,
     answer     STRING NOT NULL,
     confidence FLOAT8 NOT NULL,
@@ -137,7 +154,7 @@ CREATE TABLE IF NOT EXISTS demo_baseline (
 """
 
 
-def _cached_baseline() -> dict:
+def _cached_baseline(question: str, slot: int) -> dict:
     """The opening answer, computed once and reused by every later reset.
 
     Deterministic by construction: same question, same drug, same believed
@@ -150,25 +167,28 @@ def _cached_baseline() -> dict:
     from unsay.db import query
 
     run_in_txn(lambda c: c.execute(BASELINE_DDL), label="baseline_ddl")
-    rows = query("SELECT verdict, answer, confidence, cited FROM demo_baseline WHERE id = 1")
+    rows = query(
+        "SELECT verdict, answer, confidence, cited FROM demo_baseline WHERE id = %s",
+        (slot,),
+    )
     if rows:
         r = rows[0]
         cited = r["cited"] if isinstance(r["cited"], list) else _json.loads(r["cited"])
         return {**r, "cited": cited, "model_calls": 0}
 
-    a = agent.ask(QUESTION, subject_id=SUBJECT, persist=False)
+    a = agent.ask(question, subject_id=SUBJECT, persist=False)
     cited = sorted(a.cited)
 
     def store(conn):
         conn.execute(
             """
             INSERT INTO demo_baseline (id, verdict, answer, confidence, cited)
-            VALUES (1, %s, %s, %s, %s::JSONB)
+            VALUES (%s, %s, %s, %s, %s::JSONB)
             ON CONFLICT (id) DO UPDATE SET verdict = excluded.verdict,
                 answer = excluded.answer, confidence = excluded.confidence,
                 cited = excluded.cited
             """,
-            (a.verdict, a.answer, a.confidence, _json.dumps(cited)),
+            (slot, a.verdict, a.answer, a.confidence, _json.dumps(cited)),
         )
 
     run_in_txn(store, label="baseline_store")

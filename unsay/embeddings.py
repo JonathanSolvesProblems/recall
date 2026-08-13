@@ -100,6 +100,27 @@ def to_sql(vec: list[float]) -> str:
     return "[" + ",".join(f"{v:.6f}" for v in vec) + "]"
 
 
+_stub_warned = False
+
+
+def _warn_stub_once() -> None:
+    """Say it once per process, not once per call.
+
+    The contention test embeds 64 times and the ingest thousands, so a
+    per-call warning buried the actual result under identical lines. A warning
+    repeated 64 times is not 64 times as informative; it is less, because the
+    reader stops reading it and scrolls past the answer too.
+    """
+    global _stub_warned
+    if not _stub_warned:
+        _stub_warned = True
+        log.warning(
+            "using STUB embeddings for this process: retrieval quality is "
+            "meaningless. Structural results (versioning, provenance, sweep) "
+            "are unaffected."
+        )
+
+
 def _deterministic_stub(text: str, dim: int) -> list[float]:
     """Offline stand-in so the pipeline can be exercised without AWS credentials.
 
@@ -109,7 +130,7 @@ def _deterministic_stub(text: str, dim: int) -> list[float]:
     without network access. Every measured number in the README comes from
     Bedrock, not from this.
     """
-    log.warning("using STUB embeddings: retrieval quality is meaningless")
+    _warn_stub_once()
     seed = hashlib.sha256(text.encode("utf-8")).digest()
     out: list[float] = []
     counter = 0

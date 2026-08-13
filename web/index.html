@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Unsay — agent memory that takes it back</title>
+<title>Unsay: agent memory that takes it back</title>
 <style>
   /* The visual language is a regulatory correction notice, not a dashboard:
      paper ground, document rules, monospace for anything that identifies a
@@ -224,7 +224,8 @@ $("#candBtn").onclick = async () => {
        <div class="countsub">standing answer${c.length===1?'':'s'} built on evidence that has since changed</div>
        ${c.slice(0,12).map(x => `<div class="claim">${vpill(x.verdict)} ${esc(x.question)}<br>
          <span class="key mono">${esc((x.stale||[]).map(s=>s.fact_key+" v"+s.read_version).join(", "))}</span></div>`).join("")}`
-    : `<span class="empty">Nothing affected. Every standing answer rests on current evidence.</span>`;
+    : `<span class="empty">Nothing affected: every standing answer rests on evidence
+         that is still current. Run step 2 to supersede a claim they relied on.</span>`;
 };
 
 $("#sweepBtn").onclick = async () => {
@@ -232,10 +233,13 @@ $("#sweepBtn").onclick = async () => {
   $("#sweepOut").innerHTML = `<span class="spin"></span> <span class="muted">re-deciding each affected answer against current memory…</span>`;
   try{
     const s = await j("/api/sweep/run", {method:"POST"});
-    $("#sweepOut").innerHTML =
-      `<div class="count">${s.reversed}</div>
-       <div class="countsub">answer${s.reversed===1?'':'s'} reversed · ${s.candidates} examined ·
-         ${s.notified} notified · ${Number(s.seconds).toFixed(1)}s</div>`;
+    $("#sweepOut").innerHTML = s.candidates === 0
+      ? `<div class="empty">Nothing to repair: no standing answer rests on evidence
+           that has changed. Run step 2 first, so a claim these answers relied on
+           is superseded, then sweep again.</div>`
+      : `<div class="count">${s.reversed}</div>
+         <div class="countsub">answer${s.reversed===1?'':'s'} reversed · ${s.candidates} examined ·
+           ${s.notified} notified · ${Number(s.seconds).toFixed(1)}s</div>`;
     await loadOutbox();
     document.querySelector("#outbox").scrollIntoView({behavior:"smooth", block:"center"});
   }catch(e){ $("#sweepOut").innerHTML = `<span class="empty">${esc(e.message||e)}</span>`; }
@@ -278,6 +282,7 @@ async function autoResetIfSpent(){
       $("#resetNote").innerHTML = `<span class="spin"></span> previous visitor ran the sweep; restoring…`;
       await j("/api/demo/reset", {method:"POST"});
       $("#resetNote").textContent = "Restored automatically after the previous visitor.";
+      $("#sweepOut").innerHTML = ""; $("#supOut").innerHTML = ""; $("#answer").innerHTML = "";
       await loadPatients(); await loadOutbox(); await status();
     }
   }catch(e){}

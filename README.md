@@ -96,8 +96,8 @@ regularly tests.
 So Unsay's durable mechanism is a **bitemporal schema**, which is what those
 docs prescribe. Every claim carries two independent time axes:
 
-- `valid_from` / `valid_to` — when the claim is true **in the world**
-- `asserted_at` / `retracted_at` — when **this system** believed it
+- `valid_from` / `valid_to`: when the claim is true **in the world**
+- `asserted_at` / `retracted_at`: when **this system** believed it
 
 Keeping them apart is what separates "the drug became dangerous on March 3rd"
 from "we found out on July 2nd", which is the difference between an unlucky

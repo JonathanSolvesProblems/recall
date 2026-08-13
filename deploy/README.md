@@ -35,8 +35,8 @@ docker-compose cluster does the real thing for free.
 
 So the split is:
 
-- **Hosted demo** — the product, on Cloud Basic, up for the judging window.
-- **Region-kill demo** — recorded locally against the real 9-node cluster.
+- **Hosted demo**: the product, on Cloud Basic, up for the judging window.
+- **Region-kill demo**: recorded locally against the real 9-node cluster.
 
 Nothing about the region-kill shot needs to be hosted, and it is a genuine
 failure of a genuine cluster either way.
