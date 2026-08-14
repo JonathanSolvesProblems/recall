@@ -24,7 +24,7 @@ Walk the four numbered steps on the page, in order:
 | 2 | Click **Publish Class I recall** | The same fact key moves `v1 → v2`, prior version retracted |
 | 3 | Click **Find affected answers** | **12** standing answers, each listing the fact version it stood on |
 | 3 | Click **Run sweep** | ~4s. Then **12 examined, 9 reversed, 9 notified**. The other three had already said stop, so they are reaffirmed rather than corrected, and are deliberately not notified |
-| 4 | Scroll down | Nine correction notices, each naming a person, each `CAUTION → STOP`, each with a once-only key. Four distinct texts, because the twelve asked in four different phrasings |
+| 4 | Scroll down | Nine correction notices, each naming a person, each `CAUTION → STOP`, each with a once-only key. **Three** distinct texts across the nine: the twelve ask in four phrasings, three of which open at CAUTION and get reversed, while the fourth ("should I be worried about my blood pressure tablets") already opens at STOP and is reaffirmed instead. That fourth phrasing is the three patients who are deliberately not messaged |
 
 Then click **Run sweep** a second time. The outbox still holds **9** notices,
 not 18: the dedupe key is derived from the correction itself, so a replayed
@@ -152,6 +152,12 @@ queries keep answering. `SURVIVE REGION FAILURE` places 5 replicas so no single
 region holds a majority. Bring it back with `docker compose start crdb-euw1-1
 crdb-euw1-2 crdb-euw1-3`.
 
+The two lines to check are `survival goal` and `regions up`. The memory counts
+underneath depend entirely on what you have ingested locally, and `smoke.py`
+clears the tables as its first step, so run this before an ingest and expect
+single digits, or after one and expect hundreds. The demo video was recorded
+against a locally ingested corpus; your numbers will be your own.
+
 ---
 
 ## 4. With AWS credentials: the real path
@@ -184,12 +190,28 @@ termination date are all real openFDA records.
 ### Verifying the MCP server
 
 ```bash
-.venv/Scripts/python -c "from unsay import mcp; print(len(mcp.list_tools()), 'tools'); print(mcp.describe_table('fact')[:400])"
+.venv/Scripts/python -m unsay.cli schema fact
 ```
 
-Expect 12 tools and the live `CREATE TABLE` for `fact`, including the
-`believed` computed column and the vector index. Needs `CRDB_MCP_API_KEY`
-(service account, `mcp:read`) and `CRDB_CLUSTER_ID`.
+Prints the endpoint and scope, then the live `CREATE TABLE` for `fact` as the
+Managed MCP Server reports it right now, then the tool count. Expect 12 tools,
+the `believed BOOL ... AS (retracted_at IS NULL) STORED` computed column, and
+`VECTOR INDEX fact_semantic (believed, embedding vector_cosine_ops)`. This is
+the same call the answer path makes before the model reasons, which is the
+point: the schema is read at request time rather than carried in the prompt.
+Needs `CRDB_MCP_API_KEY` (service account, `mcp:read`) and `CRDB_CLUSTER_ID`.
+
+### Verifying the ccloud preflight
+
+```bash
+.venv/Scripts/python -m unsay.cli cluster-health
+```
+
+The same check runs automatically ahead of `ingest-recalls` and
+`ingest-warnings`, and aborts them if the control plane says the cluster is not
+fit to write to. `--skip-preflight` bypasses it. If ccloud is not installed or
+not authenticated the ingest warns and proceeds, because `ccloud auth login` is
+browser OAuth only and a fresh clone will not have a session.
 
 ---
 

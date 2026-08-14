@@ -161,6 +161,38 @@ single-region by design, so `/api/status` there reports one region and a
 Advanced-tier feature with custom pricing, and multi-region is not this
 project's thesis. Every measured result below states which cluster produced it.
 
+### The loop that makes this different
+
+The diagram above is what the system is made of. This is what it does, and it
+is the part no vector store can run: the arrow from a changed fact back to the
+answers that were built on it.
+
+```mermaid
+flowchart TD
+    FDA["openFDA enforcement + SPL labels"] -->|ingest, hash, change-detect| V1
+    V1["fact v1<br/>Class II, terminated 30 July<br/>believed = true"]
+    V1 -->|vector search, believed rows only| ASK
+    ASK["Claude reads it, answers CAUTION,<br/>and names the claims it leaned on"]
+    ASK -->|one transaction| DEC
+    DEC["decision + decision_read<br/>the exact fact VERSION it read,<br/>marked load-bearing"]
+
+    ESC["The FDA escalates that lot to Class I"] -->|one transaction| SUP
+    SUP["fact v1 retracted, v2 asserted<br/>same key, nothing overwritten"]
+
+    DEC --> J
+    SUP --> J
+    J{{"JOIN decision to decision_read to fact<br/>WHERE standing AND load-bearing<br/>AND the version read is now retracted"}}
+    J --> RE["Re-decide each one against<br/>what is believed today"]
+
+    RE -->|verdict changed: 9| C["correction + outbox, same transaction<br/>dedupe_key = hash of decision,<br/>new verdict, and fact version"]
+    RE -->|verdict unchanged: 3| L["Reaffirmed. Deliberately not messaged."]
+    C --> P["Patient told by name, exactly once,<br/>even if the sweep is killed and replayed"]
+
+    style J fill:#fdeceb,stroke:#9d1c09,stroke-width:2px
+    style SUP fill:#fdf4e3,stroke:#8a5300
+    style P fill:#e9f4ec,stroke:#1c5f36
+```
+
 Three properties carry the design.
 
 **Provenance is written atomically with the answer.** The decision row and its
@@ -196,7 +228,7 @@ The hackathon requires two.
 | **Distributed Vector Indexing** | `CREATE VECTOR INDEX fact_semantic ON fact (believed, embedding vector_cosine_ops)`. The `believed` prefix column is the point: without it a top-K search spends part of its budget on retracted claims that get filtered afterwards, so a query asking for 8 results quietly returns 3. Prefixing means all K neighbours come from claims currently held true.[^vector] | live |
 | **Agent Skills** | All 34 skills from [cockroachlabs/cockroachdb-skills](https://github.com/cockroachlabs/cockroachdb-skills) installed via `npx skills add`. `designing-application-transactions` was run against this codebase and found three real defects, listed below. | live |
 | **Managed MCP Server** | `unsay/mcp.py` speaks JSON-RPC to `https://cockroachlabs.cloud/mcp` with a service-account key scoped to `mcp:read`, and `get_table_schema` returns the live definition of `fact` from the running cluster. Introspecting beats remembering: Cockroach Labs' stated reason for the server is that an agent working from a stale schema emits "brittle queries, schema mismatches, or unnecessary load".[^mcp] | live |
-| **ccloud CLI** | Installed and authenticated; used for control-plane inspection of the hosted cluster. See the feedback note below on why the application does *not* drive it. | partial |
+| **ccloud CLI** | `unsay/ccloud.py` shells out to it for a control-plane preflight that gates both bulk ingests: `ingest-recalls` and `ingest-warnings` ask whether the cluster is fit to write to before the first embedding is paid for, and abort if it is not. A SQL connection proves one query answered; it cannot say the cluster is suspended or mid-upgrade. One read verb is wired, `cluster list`, and nothing else: the destructive verbs exist in ccloud and are deliberately absent here, because an agent that can delete a cluster is a worse trade than one that cannot. Marked partial because authentication still cannot be automated, for the reason below. | partial |
 
 Status is per row on purpose, and this table is the single place to check what
 the artifact does rather than what it intends to.
@@ -207,10 +239,13 @@ are. But `ccloud auth login` is browser OAuth only: version 0.8.23 accepts no
 API key, and `CCLOUD_API_KEY`, `COCKROACH_CLOUD_API_KEY`, `CC_API_KEY` and
 `CCLOUD_API_TOKEN` are all ignored. An agent therefore cannot authenticate it
 unattended, which is a real gap for the exact use the tool is being pitched
-for. Everything this project needed from the control plane (read cluster
-details, create a SQL user, provision a database) was done instead against the
-Cloud REST API with a service-account key, which does support headless auth.
-A `ccloud auth login --api-key` would close the gap.
+for. The preflight above works only because a human completed that OAuth flow
+once on this machine; it would not survive being run from CI or from an agent
+with no browser. Provisioning (create a SQL user, create a database) was
+therefore done against the Cloud REST API with a service-account key, which
+does support headless auth. A `ccloud auth login --api-key` would close the
+gap, and is the one change that would let an agent use this tool the way the
+tool is described.
 
 ### What the Agent Skills actually caught
 
@@ -291,7 +326,7 @@ spurious sweeps and, at the far end, 331 spurious messages to patients.
 vectors are payload and the thing being measured is the database. Everything
 about the corpus, retrieval and answers now runs on real Titan V2 vectors.
 
-### LongMemEval: measured, and it does not support the claim
+### LongMemEval: I ran it, it scored badly, and it is here anyway
 
 I ran [LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025)[^lme] on
 its hard `longmemeval_s` split, graded by its own evaluator with the published
@@ -378,9 +413,27 @@ Named plainly, because a safety tool that oversells itself is worse than none.
 - **Lot extraction is regex over free text.** openFDA writes lot numbers into
   prose, not a structured field. Recalls with no parsable lot fall back to
   drug-level scope, which over-notifies rather than under-notifies.
+- **The sweep does not pay for twelve identical model calls.** The twelve
+  patients ask in four phrasings, so the sweep re-decides each distinct
+  (question, retracted claim) pair once and applies the verdict to every
+  decision that matches it. Twelve decisions are examined, re-decided and
+  individually recorded; the reasoning behind them costs four calls rather than
+  twelve. That is a cost control on a public unauthenticated demo, alongside a
+  200-call daily cap and 40 per visitor per hour, and it is why three texts
+  repeat across the nine notices. Three, not four, because the fourth phrasing
+  ("should I be worried about my blood pressure tablets") already opens at
+  `stop`, so its three patients are reaffirmed rather than corrected. They are
+  the three the sweep deliberately leaves alone.
 - **Dispensing data is synthetic.** Real pharmacy dispensing records are PHI
   and are not obtainable for a hackathon. The FDA side is entirely real and
   live; the patient side is generated.
+- **The Class I escalation in the demo is staged, and labelled as such.** The
+  drug, the lot `GB01616`, the original Class II and its 30 July termination
+  are real openFDA records. Waiting for the FDA to genuinely re-escalate that
+  lot is not a demo, so step 2 lets the operator publish the escalation, and
+  the resulting version is stored with `source = 'demo:escalation'` rather than
+  `openfda:enforcement`. Everything downstream of it, the retraction, the join,
+  the re-decisions and the notices, runs for real against the live cluster.
 - **Not a medical device.** openFDA's own terms state the data is unvalidated
   and must not be relied on for decisions regarding medical care.[^openfda] Unsay drafts
   a correction for a pharmacist to review. It does not contact patients

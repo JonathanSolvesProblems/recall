@@ -88,12 +88,52 @@ def status() -> None:
     close_pool()
 
 
+def _control_plane_preflight(skip: bool) -> None:
+    """Ask ccloud whether the cluster is fit to write to, before a bulk write.
+
+    An ingest is hundreds of sequential Titan calls and takes minutes, so
+    discovering halfway through that the cluster is suspended or mid-upgrade
+    costs real money. SQL cannot answer that question; only the control plane
+    can, so this runs before the first embedding is paid for.
+
+    ccloud being missing is not the same answer as the cluster being unhealthy.
+    `ccloud auth login` is browser OAuth only, so a fresh clone legitimately
+    may not have it, and that warns rather than blocks. A cluster the control
+    plane says is not ready does block, because continuing is the expensive
+    mistake this check exists to prevent.
+    """
+    if skip:
+        return
+    from unsay import ccloud
+
+    try:
+        verdict = ccloud.preflight()
+    except ccloud.CcloudUnavailable as exc:
+        console.print(f"[yellow]preflight skipped:[/yellow] {exc}")
+        return
+
+    c = verdict["cluster"]
+    if c:
+        console.print(
+            f"[dim]control plane: {c['name']} {c['state']} "
+            f"{c['version']} {','.join(c['regions'] or [])}[/dim]"
+        )
+    if not verdict["ok"]:
+        console.print(f"[red]refusing to bulk write:[/red] {verdict['reason']}")
+        raise typer.Exit(1)
+    console.print(f"[green]preflight ok[/green]: {verdict['reason']}")
+
+
 @app.command("ingest-recalls")
 def ingest_recalls(
     since: str = typer.Option("2024-01-01", help="Earliest openFDA report_date."),
     limit: int | None = typer.Option(None, help="Stop after N source records."),
+    skip_preflight: bool = typer.Option(
+        False, "--skip-preflight", help="Ingest without asking the control plane first."
+    ),
 ) -> None:
     """Pull drug recalls from openFDA into bitemporal memory."""
+    _control_plane_preflight(skip_preflight)
     started = time.time()
     stats = ingest.ingest_recalls(since=since, limit=limit)
     console.print(
@@ -104,8 +144,14 @@ def ingest_recalls(
 
 
 @app.command("ingest-warnings")
-def ingest_warnings(limit: int | None = typer.Option(None)) -> None:
+def ingest_warnings(
+    limit: int | None = typer.Option(None),
+    skip_preflight: bool = typer.Option(
+        False, "--skip-preflight", help="Ingest without asking the control plane first."
+    ),
+) -> None:
     """Pull boxed-warning labels from openFDA into bitemporal memory."""
+    _control_plane_preflight(skip_preflight)
     started = time.time()
     stats = ingest.ingest_boxed_warnings(limit=limit)
     console.print(
@@ -216,6 +262,41 @@ def cluster_health() -> None:
     close_pool()
     if not v["ok"]:
         raise typer.Exit(1)
+
+
+@app.command()
+def schema(
+    table: str = typer.Argument("fact", help="Table to introspect."),
+    database: str = typer.Option("unsay", help="Database holding it."),
+) -> None:
+    """Print a table's definition as the Managed MCP Server reports it now.
+
+    This is the same call the answer path makes before the model reasons: the
+    schema is read from the running cluster at request time rather than carried
+    in the prompt, so a column added this morning is visible this morning.
+    """
+    from unsay import mcp
+    from unsay.config import settings
+
+    try:
+        console.print(
+            f"[dim]{settings().crdb_mcp_endpoint}  ·  scope mcp:read[/dim]"
+        )
+        raw = mcp.describe_table(table, database=database)
+        # The server answers with a select_query envelope, so the readable
+        # part has to be dug out. Falling back to the raw text keeps this
+        # honest if the envelope ever changes shape.
+        try:
+            stmt = json.loads(raw)["rows"][0]["create_statement"]
+        except (ValueError, KeyError, IndexError):
+            stmt = raw
+        console.print(stmt.replace("\\n", "\n"))
+        console.print(
+            f"[dim]{len(mcp.list_tools())} tools exposed by the server[/dim]"
+        )
+    except mcp.MCPUnavailable as exc:
+        console.print(f"[red]MCP unavailable:[/red] {exc}")
+        raise typer.Exit(2) from exc
 
 
 @app.command()

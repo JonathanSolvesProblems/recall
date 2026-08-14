@@ -55,3 +55,9 @@ bench/data/extracted/
 
 # Recording workspace: raw takes, screen captures, scratch narration
 broll/
+
+# vidkit generated media. Not committed: the video lives on YouTube.
+_videos/
+*.webm
+demo.mp4
+*.edit-plan.json

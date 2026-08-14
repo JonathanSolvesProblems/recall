@@ -37,7 +37,26 @@ if ! aws iam get-role --role-name "$ROLE" >/dev/null 2>&1; then
   echo "waiting for role propagation"; sleep 12
 fi
 
-ENV_VARS="Variables={UNSAY_DSN=${UNSAY_CLOUD_DSN},AWS_REGION_NAME=${REGION},UNSAY_POOL_MIN=0,UNSAY_POOL_MAX=2}"
+# CockroachDB Cloud hands out a `sslmode=verify-full` DSN with no sslrootcert.
+# That works on a developer machine because the system libpq finds a trust
+# store on its own. Inside Lambda it does not: there is no
+# ~/.postgresql/root.crt, so libpq refuses every connection with "root
+# certificate file does not exist" and the demo answers pool timeouts. The
+# obvious `sslrootcert=system` does not fix it either, because psycopg[binary]
+# ships its own OpenSSL whose compiled-in trust directory is absent from the
+# execution environment, which fails one step later with "certificate verify
+# failed". Pointing at certifi's bundle, which is already in the zip, gives
+# that OpenSSL a CA set that exists. Verification stays full; only the location
+# of the roots changes. Appended here rather than expected in .env so a fresh
+# clone cannot deploy a demo that cannot reach its database.
+DSN="$UNSAY_CLOUD_DSN"
+case "$DSN" in
+  *sslrootcert=*) ;;
+  *\?*)           DSN="${DSN}&sslrootcert=/var/task/certifi/cacert.pem" ;;
+  *)              DSN="${DSN}?sslrootcert=/var/task/certifi/cacert.pem" ;;
+esac
+
+ENV_VARS="Variables={UNSAY_DSN=${DSN},AWS_REGION_NAME=${REGION},UNSAY_POOL_MIN=0,UNSAY_POOL_MAX=2}"
 
 if aws lambda get-function --function-name "$FN" --region "$REGION" >/dev/null 2>&1; then
   echo "updating $FN"

@@ -189,7 +189,12 @@ def supersede(req: SupersedeRequest) -> dict[str, Any]:
         severity="class_i",
         valid_from=now,
         valid_to=None,
-        source="openfda:enforcement",
+        # Not openfda:enforcement. The lot, the drug and the original Class II
+        # are real FDA records; this escalation is staged so the scenario can be
+        # driven on demand. Labelling it as an FDA record would put a claim the
+        # FDA never published under the FDA's name, in a system whose entire
+        # argument is that provenance is exact.
+        source="demo:escalation",
         source_ref="DEMO-ESCALATION",
     )
     vector = embeddings.embed(text)

@@ -1,0 +1,72 @@
+{
+  "project_name": "Unsay",
+  "url": "https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/",
+  "shots": [
+    {
+      "id": "01-hero",
+      "description": "Landing state: four numbered steps, live claim count in the header",
+      "type": "web",
+      "actions": [
+        { "type": "goto", "url": "https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/" },
+        { "type": "wait", "seconds": 4 }
+      ]
+    },
+    {
+      "id": "04-answer",
+      "description": "Agent answers CAUTION, with the FDA claim and version it read",
+      "type": "web",
+      "actions": [
+        { "type": "goto", "url": "https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/" },
+        { "type": "wait", "seconds": 4 },
+        { "type": "click", "selector": "#askBtn" },
+        { "type": "wait", "seconds": 12 }
+      ]
+    },
+    {
+      "id": "06-supersede",
+      "description": "Class I published: v1 struck through, v2 asserted under the same key",
+      "type": "web",
+      "actions": [
+        { "type": "goto", "url": "https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/" },
+        { "type": "wait", "seconds": 4 },
+        { "type": "click", "selector": "#supBtn" },
+        { "type": "wait", "seconds": 8 }
+      ]
+    },
+    {
+      "id": "08-affected",
+      "description": "Twelve standing answers rest on evidence that has changed",
+      "type": "web",
+      "actions": [
+        { "type": "goto", "url": "https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/" },
+        { "type": "wait", "seconds": 4 },
+        { "type": "click", "selector": "#candBtn" },
+        { "type": "wait", "seconds": 6 }
+      ]
+    },
+    {
+      "id": "10-sweep",
+      "description": "Sweep result: nine reversed of twelve examined",
+      "type": "web",
+      "actions": [
+        { "type": "goto", "url": "https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/" },
+        { "type": "wait", "seconds": 4 },
+        { "type": "click", "selector": "#sweepBtn" },
+        { "type": "wait", "seconds": 18 }
+      ]
+    },
+    {
+      "id": "11-corrections",
+      "description": "Correction notices, each naming a person, CAUTION to STOP",
+      "type": "web",
+      "actions": [
+        { "type": "goto", "url": "https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/" },
+        { "type": "wait", "seconds": 5 },
+        { "type": "scroll" },
+        { "type": "scroll" },
+        { "type": "scroll" },
+        { "type": "wait", "seconds": 2 }
+      ]
+    }
+  ]
+}
