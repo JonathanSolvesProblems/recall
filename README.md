@@ -24,14 +24,14 @@ Two claims, both demonstrated below rather than asserted:
 
 ## The problem this exists for
 
-The named Day-2 failure of agent memory in 2026 is **stale context**:
-similarity to a stored memory does not prove that the memory is still true. An
-agent retrieves a fact that was correct when it was written, and answers as if
-it were correct now.
+Agent memory has a failure mode that retrieval quality cannot fix: **stale
+context**. Similarity to a stored memory does not prove that the memory is
+still true. An agent retrieves a fact that was correct when it was written and
+answers as if it were correct now.
 
 For most agents that is embarrassing. In a pharmacy it is a Class I recall,
 which the FDA defines as a reasonable probability of serious adverse health
-consequences or death.
+consequences or death.[^fda]
 
 The gap is documented. A 2024 study at an academic medical center,
 [*Automating Individualized Notification of Drug Recalls to Patients*](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC12798837/),
@@ -40,7 +40,7 @@ through their EHR portal. It hit two walls. Most recalls are Class II, so
 notification "stops with wholesalers and pharmacies rather than reaching
 patients." And critically: *"it was not possible to trace a medication
 prescription from the EHR to specific lot numbers dispensed to that patient by
-a community pharmacy."*
+a community pharmacy."*[^study]
 
 A recall is scoped to a lot. If you cannot resolve a lot to a person, you
 either tell everybody or you tell nobody.
@@ -89,9 +89,9 @@ up until the garbage collector moves past the timestamp you saved.
 
 CockroachDB's own documentation says so plainly: `gc.ttlseconds` *"is not meant
 to be a solution for long-term retention of history; for that you should
-handle versioning in the schema design at the application layer."* The default
-window is **4 hours**. **25 hours** is the largest value Cockroach Labs
-regularly tests.
+handle versioning in the schema design at the application layer."*[^gcttl] The
+default window is **4 hours**. **25 hours** is the largest value Cockroach Labs
+regularly tests.[^aost]
 
 So Unsay's durable mechanism is a **bitemporal schema**, which is what those
 docs prescribe. Every claim carries two independent time axes:
@@ -183,7 +183,7 @@ CockroachDB puts it there.
 
 The cluster runs 9 nodes across 3 simulated AWS regions under
 `SURVIVE REGION FAILURE`, which places 5 replicas so no region holds a
-majority.
+majority.[^survival]
 
 ---
 
@@ -193,9 +193,9 @@ The hackathon requires two.
 
 | Tool | How it is used | Status |
 |---|---|---|
-| **Distributed Vector Indexing** | `CREATE VECTOR INDEX fact_semantic ON fact (believed, embedding vector_cosine_ops)`. The `believed` prefix column is the point: without it a top-K search spends part of its budget on retracted claims that get filtered afterwards, so a query asking for 8 results quietly returns 3. Prefixing means all K neighbours come from claims currently held true. | live |
+| **Distributed Vector Indexing** | `CREATE VECTOR INDEX fact_semantic ON fact (believed, embedding vector_cosine_ops)`. The `believed` prefix column is the point: without it a top-K search spends part of its budget on retracted claims that get filtered afterwards, so a query asking for 8 results quietly returns 3. Prefixing means all K neighbours come from claims currently held true.[^vector] | live |
 | **Agent Skills** | All 34 skills from [cockroachlabs/cockroachdb-skills](https://github.com/cockroachlabs/cockroachdb-skills) installed via `npx skills add`. `designing-application-transactions` was run against this codebase and found three real defects, listed below. | live |
-| **Managed MCP Server** | `unsay/mcp.py` speaks JSON-RPC to `https://cockroachlabs.cloud/mcp` with a service-account key scoped to `mcp:read`, and `get_table_schema` returns the live definition of `fact` from the running cluster. Introspecting beats remembering: Cockroach Labs' stated reason for the server is that an agent working from a stale schema emits "brittle queries, schema mismatches, or unnecessary load". | live |
+| **Managed MCP Server** | `unsay/mcp.py` speaks JSON-RPC to `https://cockroachlabs.cloud/mcp` with a service-account key scoped to `mcp:read`, and `get_table_schema` returns the live definition of `fact` from the running cluster. Introspecting beats remembering: Cockroach Labs' stated reason for the server is that an agent working from a stale schema emits "brittle queries, schema mismatches, or unnecessary load".[^mcp] | live |
 | **ccloud CLI** | Installed and authenticated; used for control-plane inspection of the hosted cluster. See the feedback note below on why the application does *not* drive it. | partial |
 
 Status is per row on purpose, and this table is the single place to check what
@@ -293,7 +293,7 @@ about the corpus, retrieval and answers now runs on real Titan V2 vectors.
 
 ### LongMemEval: measured, and it does not support the claim
 
-I ran [LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025) on
+I ran [LongMemEval](https://github.com/xiaowu0162/LongMemEval) (ICLR 2025)[^lme] on
 its hard `longmemeval_s` split, graded by its own evaluator with the published
 GPT-4o judge. The results are worse than the systems it would be compared to:
 
@@ -301,8 +301,15 @@ GPT-4o judge. The results are worse than the systems it would be compared to:
 |---|---|
 | temporal-reasoning, `s` split, n=39, k=10 | **20.5%** |
 | same 12 instances, k=10 vs k=40 | 25% → 33.3% |
-| Published: Zep / Graphiti, same sub-task | 63.8% |
-| Published: Mem0, same sub-task | 49.0% |
+| Reported for Zep / Graphiti, same sub-task [^zepcmp] | 63.8% |
+| Reported for Mem0, same sub-task [^zepcmp] | 49.0% |
+
+Those two comparison figures deserve a caveat I did not give them at first.
+They come from a third-party comparison [^zepcmp], not from Zep's own paper
+[^zep], whose abstract reports "improvements up to 18.5%" on LongMemEval and
+94.8% on DMR and does not state 63.8% anywhere I could find. So treat them as
+indicative of the gap rather than as a precisely matched baseline. What is not
+in doubt is the direction: 20.5% is well short of any published system.
 
 The failure mode is specific and worth stating: **25 of 31 wrong answers were
 "I don't know"**, not confident errors. With a median of 125 facts stored per
@@ -375,12 +382,16 @@ Named plainly, because a safety tool that oversells itself is worse than none.
   and are not obtainable for a hackathon. The FDA side is entirely real and
   live; the patient side is generated.
 - **Not a medical device.** openFDA's own terms state the data is unvalidated
-  and must not be relied on for decisions regarding medical care. Unsay drafts
+  and must not be relied on for decisions regarding medical care.[^openfda] Unsay drafts
   a correction for a pharmacist to review. It does not contact patients
   autonomously.
 - **`crdb_internal` is avoided.** v26.2 restricts it with a hint that it is
   unsupported in production. Cluster status is read through supported SQL and
   connection probes instead of setting `allow_unsafe_internals`.
+- **The public function URL needs two IAM permissions, not one.** Function
+  URLs created after October 2025 require `lambda:InvokeFunctionUrl` and
+  `lambda:InvokeFunction` even under `AuthType: NONE`; granting only the first
+  returns 403 against a policy that reads as correct.[^lambdaauth]
 - **Region-failure survival needs a licence.** Enterprise Free, at no cost for
   companies under $10M revenue, from the CockroachDB Cloud console. Without it
   the schema still works single-region.
@@ -388,3 +399,72 @@ Named plainly, because a safety tool that oversells itself is worse than none.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+---
+
+## References
+
+Every external claim in this README traces to one of these. Where a figure
+comes from a secondary source, that is said rather than implied.
+
+[^study]: Automating Individualized Notification of Drug Recalls to Patients:
+    Complex Challenges and Qualitative Evaluation (2024).
+    <https://www.ncbi.nlm.nih.gov/pmc/articles/PMC12798837/>
+    Source for: most recalls being Class II and notification stopping at
+    wholesalers and pharmacies, and for prescriptions not being traceable to
+    the lot dispensed. This is the gap the project exists to close.
+
+[^fda]: FDA, Recalls Background and Definitions.
+    <https://www.fda.gov/safety/industry-guidance-recalls/recalls-background-and-definitions>
+    Source for: Class I meaning a reasonable probability of serious adverse
+    health consequences or death.
+
+[^gcttl]: CockroachDB, Configure Replication Zones.
+    <https://www.cockroachlabs.com/docs/v26.2/configure-replication-zones>
+    Source for the verbatim quote that `gc.ttlseconds` "is not meant to be a
+    solution for long-term retention of history; for that you should handle
+    versioning in the schema design at the application layer", and for the
+    default window. Claim 2 rests entirely on this.
+
+[^aost]: CockroachDB, AS OF SYSTEM TIME.
+    <https://www.cockroachlabs.com/docs/v26.2/as-of-system-time>
+
+[^survival]: CockroachDB, Multi-Region Survival Goals.
+    <https://www.cockroachlabs.com/docs/v26.2/multiregion-survival-goals>
+    Source for: `SURVIVE REGION FAILURE` placing five replicas so that no
+    single region holds a majority.
+
+[^vector]: CockroachDB, Vector Indexes.
+    <https://www.cockroachlabs.com/docs/v26.2/vector-indexes>
+
+[^mcp]: Cockroach Labs, Managed MCP Server for AI Agents.
+    <https://www.cockroachlabs.com/blog/cockroachdb-ai-agents-managed-mcp-server/>
+    Source for: schema hallucination being the stated problem the server
+    exists to solve, and for the read-only-by-default posture.
+
+[^lme]: LongMemEval: Benchmarking Chat Assistants on Long-Term Interactive
+    Memory (ICLR 2025). <https://github.com/xiaowu0162/LongMemEval>
+    The benchmark and its official GPT-4o evaluator, used unmodified except
+    for pinning file reads to UTF-8 so it runs on Windows.
+
+[^zep]: Rasmussen et al., Zep: A Temporal Knowledge Graph Architecture for
+    Agent Memory (2025). <https://arxiv.org/abs/2501.13956>
+    Primary source for Graphiti's temporal edges. Note it reports
+    "improvements up to 18.5%" on LongMemEval and 94.8% on DMR, and does not
+    state the 63.8% figure quoted in secondary comparisons.
+
+[^zepcmp]: Atlan, Zep vs Mem0: Benchmarks, Pricing, and When to Use Each.
+    <https://atlan.com/know/zep-vs-mem0/>
+    Secondary source, and the origin of the 63.8% and 49.0% temporal-reasoning
+    figures. Not verified against either project's primary publication.
+
+[^openfda]: openFDA Drug Enforcement (recall) API.
+    <https://open.fda.gov/apis/drug/enforcement/>
+    The live data behind every claim in the corpus. Its terms state the data
+    is not validated for clinical use, which is why this drafts a correction
+    for a pharmacist rather than contacting anyone.
+
+[^lambdaauth]: AWS, Control access to Lambda function URLs.
+    <https://docs.aws.amazon.com/lambda/latest/dg/urls-auth.html>
+    Source for function URLs requiring both `lambda:InvokeFunctionUrl` and
+    `lambda:InvokeFunction` even under `AuthType: NONE`.
