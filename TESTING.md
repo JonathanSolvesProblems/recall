@@ -3,6 +3,10 @@
 Ordered by effort. Section 1 needs nothing installed and takes about two
 minutes; section 5 rebuilds everything from scratch.
 
+If you would rather watch first, the
+[2:34 demo](https://www.youtube.com/watch?v=UiWwvPHfN3A) walks the same path
+this document tells you how to reproduce.
+
 Every claim in the README maps to something runnable here. Where a check can
 only be done one way, that is said rather than implied.
 

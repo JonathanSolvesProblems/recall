@@ -2,7 +2,8 @@
 
 **An AI medication-safety agent that goes back and un-says what it told you.**
 
-**[Live demo](https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/)**
+**[Watch the 2:34 demo](https://www.youtube.com/watch?v=UiWwvPHfN3A)**
+· **[Live demo](https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/)**
 · [health](https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/api/health)
 · AWS Lambda in front of a CockroachDB Cloud cluster holding 554 live openFDA
 claims. First request after a quiet spell pays a cold start of a few seconds.
