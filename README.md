@@ -4,6 +4,7 @@
 
 **[Watch the 2:34 demo](https://www.youtube.com/watch?v=UiWwvPHfN3A)**
 · **[Live demo](https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/)**
+· [write-up](https://jonathanandrei.com/blog/unsay-agent-memory-cockroachdb-bitemporal-fda-recalls/)
 · [health](https://dzcqeaznqrb2dwvy3h4btiavrm0etzef.lambda-url.us-east-1.on.aws/api/health)
 · AWS Lambda in front of a CockroachDB Cloud cluster holding 554 live openFDA
 claims. First request after a quiet spell pays a cold start of a few seconds.
@@ -450,6 +451,16 @@ Named plainly, because a safety tool that oversells itself is worse than none.
 - **Region-failure survival needs a licence.** Enterprise Free, at no cost for
   companies under $10M revenue, from the CockroachDB Cloud console. Without it
   the schema still works single-region.
+
+## Where else this is written up
+
+- **[The 2:34 demo](https://www.youtube.com/watch?v=UiWwvPHfN3A)**, which walks
+  the whole scenario against the live cluster.
+- **[Long-form write-up](https://jonathanandrei.com/blog/unsay-agent-memory-cockroachdb-bitemporal-fda-recalls/)**:
+  why stale context is the failure mode retrieval quality cannot fix, why the
+  obvious `AS OF SYSTEM TIME` design has a horizon, and what the bitemporal
+  schema costs to get instead.
+- **[TESTING.md](TESTING.md)**, if you would rather run it than read about it.
 
 ## Licence
 
