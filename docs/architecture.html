@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Unsay architecture</title>
+<style>
+  /* Devpost asks for a diagram showing how CockroachDB, AWS and the agent
+     interact, so the layout is organised by that question rather than by
+     component type: what AWS does, what CockroachDB holds, and the loop that
+     runs between them. Same paper-and-ink palette as the app. */
+  :root{
+    --ink:#171512; --paper:#faf8f4; --card:#fff; --rule:#d9d3c8; --muted:#6f6a61;
+    --stop:#9d1c09; --stop-bg:#fdeceb; --caution:#8a5300; --caution-bg:#fdf4e3;
+    --safe:#1c5f36; --safe-bg:#e9f4ec; --aws:#8a5300; --crdb:#1b4ed8;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{width:2000px;height:1150px;background:var(--paper);color:var(--ink);
+       font:19px/1.45 ui-sans-serif,-apple-system,"Segoe UI",Inter,sans-serif;
+       padding:44px 52px;overflow:hidden}
+  .mono{font-family:ui-monospace,Consolas,monospace}
+  h1{font-size:38px;letter-spacing:-.025em;margin-bottom:4px}
+  .sub{color:var(--muted);font-size:21px;margin-bottom:26px}
+
+  .row{display:flex;gap:22px;align-items:stretch}
+  .col{display:flex;flex-direction:column;gap:16px}
+
+  .zone{border:2px solid var(--rule);border-radius:14px;padding:18px 20px;background:#fdfcfa}
+  .zone > .zt{font-size:15px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;
+              color:var(--muted);margin-bottom:14px}
+  .zone.aws{border-color:#e3cfa4;background:#fffdf7}
+  .zone.aws > .zt{color:var(--aws)}
+  .zone.crdb{border-color:#c2cff2;background:#fbfcff}
+  .zone.crdb > .zt{color:var(--crdb)}
+
+  .box{background:var(--card);border:1px solid var(--rule);border-radius:10px;
+       padding:13px 15px}
+  .box .n{font-weight:750;font-size:20px;letter-spacing:-.01em}
+  .box .d{color:var(--muted);font-size:16px;margin-top:5px;line-height:1.35}
+  .box .c{font-size:14.5px;color:var(--muted);margin-top:7px}
+  .box.hot{border-left:5px solid var(--stop)}
+  .box.warm{border-left:5px solid var(--caution)}
+  .box.cool{border-left:5px solid var(--crdb)}
+  .box.good{border-left:5px solid var(--safe)}
+
+  .arrow{display:flex;align-items:center;justify-content:center;color:var(--muted);
+         font-size:30px;min-width:38px}
+  .lbl{font-size:14px;color:var(--muted);text-align:center;line-height:1.25;
+       max-width:112px;margin-top:5px}
+  .vstack{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:118px}
+
+  table{border-collapse:collapse;width:100%;font-size:16px}
+  td{padding:5px 8px;border-bottom:1px solid #efeae1}
+  td:first-child{font-weight:700;white-space:nowrap;width:172px}
+  tr:last-child td{border-bottom:none}
+  .tag{font-size:13px;font-weight:800;letter-spacing:.06em;padding:2px 8px;
+       border-radius:4px;background:var(--stop-bg);color:var(--stop)}
+
+  .loop{margin-top:20px;border:2px dashed var(--stop);border-radius:14px;
+        padding:18px 20px;background:#fffcfb}
+  .loop .zt{color:var(--stop)}
+  .steps{display:flex;gap:14px;align-items:stretch}
+  .step{flex:1;background:var(--card);border:1px solid var(--rule);border-radius:10px;
+        padding:12px 14px}
+  .step .k{font-size:13px;font-weight:800;color:var(--stop);letter-spacing:.1em}
+  .step .n{font-weight:700;font-size:17.5px;margin-top:3px}
+  .step .d{color:var(--muted);font-size:15px;margin-top:5px;line-height:1.35}
+  .foot{margin-top:16px;color:var(--muted);font-size:16px}
+</style>
+</head>
+<body>
+  <h1>Unsay: how the agent, CockroachDB and AWS fit together</h1>
+  <p class="sub">Every arrow is a real call path. The dashed loop is the part no vector store can run.</p>
+
+  <div class="row">
+    <!-- AWS -->
+    <div class="zone aws" style="width:560px">
+      <div class="zt">AWS</div>
+      <div class="col">
+        <div class="box warm">
+          <div class="n">AWS Lambda</div>
+          <div class="d">Public function URL hosting the demo and the ingest CLI path. Nothing charged while idle, which is what four weeks of judging mostly is.</div>
+          <div class="c mono">pool 0..2, because a frozen environment holds connections</div>
+        </div>
+        <div class="box warm">
+          <div class="n">Amazon Bedrock &middot; Claude Sonnet 4.5</div>
+          <div class="d">Reads the retrieved claims, decides the verdict, writes the answer, and <b>names the claims it leaned on</b>. Those citations are what make repair possible.</div>
+        </div>
+        <div class="box warm">
+          <div class="n">Amazon Bedrock &middot; Titan Text Embeddings V2</div>
+          <div class="d">1024-dimension vectors for all 554 claims. Sized to match <span class="mono">VECTOR(1024)</span>.</div>
+        </div>
+        <div class="box warm">
+          <div class="n">Amazon Bedrock &middot; Claude Haiku 4.5</div>
+          <div class="d">Bulk fact extraction in the benchmark, where call volume is ~40x the answer path and the work is mechanical.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="vstack">
+      <div class="arrow">&#8646;</div>
+      <div class="lbl">embed, reason,<br>cite</div>
+      <div style="height:26px"></div>
+      <div class="arrow">&#8594;</div>
+      <div class="lbl">SQL over<br>pgwire, TLS</div>
+    </div>
+
+    <!-- CockroachDB -->
+    <div class="zone crdb" style="flex:1">
+      <div class="zt">CockroachDB &middot; the memory</div>
+      <div class="col">
+        <div class="box cool">
+          <div class="n">fact <span class="tag">BITEMPORAL</span></div>
+          <div class="d"><span class="mono">valid_from / valid_to</span> is when the claim is true in the world.
+            <span class="mono">asserted_at / retracted_at</span> is when this system believed it. A claim is never
+            updated in place: v1 is retracted and v2 asserted beside it, in one transaction.</div>
+          <div class="c mono">believed BOOL AS (retracted_at IS NULL) STORED</div>
+          <div class="c mono">VECTOR INDEX fact_semantic (believed, embedding vector_cosine_ops)</div>
+        </div>
+        <div class="box cool">
+          <div class="n">decision &rarr; decision_read</div>
+          <div class="d">What the agent said, and the exact claim <i>version</i> it read, written in the same
+            transaction as the answer. No code path stores an answer without its provenance.</div>
+        </div>
+        <div class="box cool">
+          <div class="n">correction &middot; outbox &middot; memory_audit</div>
+          <div class="d">The repair, the notice, and the audit line, all committed with the change they describe.
+            The outbox key is a hash of the correction, so a replayed sweep is a no-op.</div>
+        </div>
+        <div class="box good">
+          <div class="n">9 nodes &middot; 3 regions &middot; SURVIVE REGION FAILURE <span class="tag" style="background:#eef0f4;color:var(--muted)">LOCAL ONLY</span></div>
+          <div class="d">5 replicas placed so no single region holds a majority. <span class="mono">patient</span> is
+            REGIONAL BY ROW, so residency is enforced by storage rather than by application code.
+            <b>The hosted demo is CockroachDB Cloud Basic, which is single-region</b>, so it reports a
+            <span class="mono">zone</span> survival goal. Multi-region is an Advanced-tier feature; this
+            topology is the local <span class="mono">docker compose</span> cluster.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Control and tooling -->
+    <div class="zone" style="width:410px">
+      <div class="zt">Control plane &amp; tooling</div>
+      <table>
+        <tr><td>Managed MCP&nbsp;Server</td><td>Live <span class="mono">fact</span> schema read at request time, scope <span class="mono">mcp:read</span>. Never a cached schema.</td></tr>
+        <tr><td>ccloud CLI</td><td>Read-only preflight gating both bulk ingests. Destructive verbs deliberately unwired.</td></tr>
+        <tr><td>Agent Skills</td><td>All 34 installed. <span class="mono">designing-application-transactions</span> found 3 real defects here.</td></tr>
+        <tr><td>openFDA</td><td>400 enforcement records &rarr; 554 claims across 315 drugs.</td></tr>
+      </table>
+      <div class="box" style="margin-top:14px">
+        <div class="n" style="font-size:17px">Guardrail</div>
+        <div class="d">The model may not return <b>safe</b> while an active Class I or II recall for the same
+          product is in its context. The verdict is raised to <b>stop</b> and the override logged.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- The loop -->
+  <div class="loop">
+    <div class="zt">The retroactive repair loop</div>
+    <div class="steps">
+      <div class="step">
+        <div class="k">1 &middot; INGEST</div>
+        <div class="n">A claim changes</div>
+        <div class="d">The FDA escalates a lot. v1 retracted, v2 asserted under the same key, one transaction.</div>
+      </div>
+      <div class="step">
+        <div class="k">2 &middot; SQL</div>
+        <div class="n">Find what depended on it</div>
+        <div class="d"><span class="mono">decision &#8594; decision_read &#8594; fact</span> where the answer still stands, the read was load-bearing, and the version it read is now retracted.</div>
+      </div>
+      <div class="step">
+        <div class="k">3 &middot; BEDROCK</div>
+        <div class="n">Re-decide each one</div>
+        <div class="d">Against what is believed today, not against what was believed then.</div>
+      </div>
+      <div class="step">
+        <div class="k">4 &middot; COCKROACHDB</div>
+        <div class="n">Repair, or leave alone</div>
+        <div class="d">Verdict changed: correction plus outbox notice, one transaction. Unchanged: reaffirmed, and deliberately not messaged.</div>
+      </div>
+      <div class="step">
+        <div class="k">5 &middot; REPLAY</div>
+        <div class="n">Answer at any past instant</div>
+        <div class="d">Bitemporal reconstruction still answers at 45 days, where <span class="mono">AS OF SYSTEM TIME</span> has hit the GC threshold.</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">Demo scenario, measured on the hosted cluster: 12 standing answers examined, 9 reversed and notified by name, 3 reaffirmed and not messaged, in under 5 seconds.</p>
+</body>
+</html>

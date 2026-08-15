@@ -130,34 +130,19 @@ still answers.
 
 ## Architecture
 
-```
-   openFDA                AWS Lambda            Amazon Bedrock
- enforcement +   ──────▶  ingest +     ──────▶  Titan V2 embeddings
-   SPL labels             change detect         Claude (the agent)
-                               │                        │
-                               ▼                        ▼
-              ┌─────────────────────────────────────────────────┐
-              │            CockroachDB  (memory)                │
-              │                                                 │
-              │  fact          bitemporal claims + VECTOR(1024) │
-              │  decision      what the agent said              │
-              │  decision_read which claim VERSION it read      │
-              │  correction    what changed and why             │
-              │  outbox        exactly-once patient notices     │
-              │                                                 │
-              │  us-east-1    us-west-2    eu-west-1            │
-              │  SURVIVE REGION FAILURE   REGIONAL BY ROW       │
-              └─────────────────────────────────────────────────┘
-                               │
-                               ▼
-                     Amazon S3: raw snapshots,
-                     signed audit exports
-```
+![Unsay architecture: AWS Lambda and Amazon Bedrock on the left, the
+CockroachDB memory schema in the middle, the control-plane tooling on the
+right, and the five-step retroactive repair loop across the
+bottom](docs/architecture.png)
 
-**There are two clusters, and they do different jobs.** The diagram above is
-the local one: 9 nodes, 3 simulated AWS regions, `SURVIVE REGION FAILURE`,
-which is what `docker compose` brings up and what the region-kill demo runs
-against. The **hosted demo** is CockroachDB Cloud **Basic**, which is
+*Source: [docs/architecture.html](docs/architecture.html), rendered at
+2000x1180.*
+
+**There are two clusters, and they do different jobs.** The multi-region row
+in the diagram is the local one: 9 nodes, 3 simulated AWS regions,
+`SURVIVE REGION FAILURE`, which is what `docker compose` brings up and what the
+region-kill demo runs against. The **hosted demo** is CockroachDB Cloud
+**Basic**, which is
 single-region by design, so `/api/status` there reports one region and a
 `zone` survival goal. That is not a discrepancy; multi-region on Cloud is an
 Advanced-tier feature with custom pricing, and multi-region is not this
@@ -165,9 +150,9 @@ project's thesis. Every measured result below states which cluster produced it.
 
 ### The loop that makes this different
 
-The diagram above is what the system is made of. This is what it does, and it
-is the part no vector store can run: the arrow from a changed fact back to the
-answers that were built on it.
+The loop along the bottom of the diagram, drawn precisely: the arrow from a
+changed fact back to the answers that were built on it, with the exact
+conditions the join tests. This is the part no vector store can run.
 
 ```mermaid
 flowchart TD
