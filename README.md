@@ -309,6 +309,7 @@ Measured on the **hosted** cluster unless the row says local:
 | Property | Result |
 |---|---|
 | Real openFDA ingestion | 400 live enforcement records to **554 claims** across **315 drugs**, embedded with Titan V2 |
+| Vector recall vs a full scan | 5 probe queries, `scripts/vector_recall.py`: **4 of 5** identical ordered top-8; the fifth substituted one rank-7 neighbour **0.001** further away. Approximate, and the substitutions are ties |
 | Severity mix | 21 active Class I, 494 Class II, 39 Class III |
 | Lot extraction | **455 of 554 (82.1%)** resolved to a specific lot rather than a whole drug |
 | Idempotency | Re-ingesting identical claims produced **0** new versions |
